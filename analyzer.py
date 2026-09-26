@@ -1080,10 +1080,17 @@ def analyse(ori, stage, ori_name="", stage_name=""):
             "map_options": [],
         }
 
-    options = build_map_options(ori, stage, generic_candidates=candidates, profile_key=profile_key, limit=3)
+    profile_key = profile["key"]
+
+    options = build_map_options(
+        ori,
+        stage,
+        generic_candidates=candidates,
+        profile_key=profile_key,
+        limit=3,
+    )
     top = options[0]["candidate"]
     top_graph = options[0]["graph"]
-    profile_key = profile["key"]
 
     qualifies = (
         top["score"] >= 72
