@@ -603,6 +603,8 @@ function renderTable(points) {
 
 
 // Decoration only, so it runs last and can never stop the analyser above
+new MatrixRain(document.getElementById("matrix-rain"));
+
 new DecryptedText(document.getElementById("page-title"), {
     animateOn: "inViewHover",
     effect: "scramble",
