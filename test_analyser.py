@@ -37,6 +37,11 @@ pairs = [
         test_files / "edc17c64_leon2_stage2.bin",
     ),
     (
+        "VW Touareg EDC16U1",
+        test_files / "edc16u1_ori.bin",
+        test_files / "edc16u1_stage1.bin",
+    ),
+    (
         "Jaguar EDC17CP55",
         test_files / "edc17cp55_ori.bin",
         test_files / "edc17cp55_stage1.bin",
@@ -68,6 +73,7 @@ def candidate_range(c):
     ("Car 2", 0x3AAC58, (6, 21), 620.0, 620.0),
     ("Seat EDC17C64", 0x3549F2, (6, 25), 403.0, 480.0),
     ("Seat Leon EDC17C64 #2", 0x357684, (6, 25), 460.0, 500.0),
+    ("VW Touareg EDC16U1", 0xDDFDE, (3, 23), 456.0, 581.5),
     ("Jaguar EDC17CP55", 0x2EB2F4, (1, 25), 700.0, 770.0),
 ])
 def test_finds_bosch_torque_limiter(name, offset, dims, peak_ori, peak_stage):
@@ -95,6 +101,17 @@ def test_edc17c64_rpm_axis_is_half_rpm_per_count(name):
     first = graph["points"][0]
     assert (first["rpm"], first["ori_torque_nm"]) == (1000, 172.0)
     assert graph["points"][-1]["rpm"] == 5500
+
+
+def test_edc16_map_is_big_endian_with_rpm_one_per_count():
+    result = result_for("VW Touareg EDC16U1")
+    c = result["candidate"]
+    assert result["profile"]["key"] == "edc16"
+    assert (c["endian"], c["ecu_family"]) == ("big", "EDC16")
+    assert c["row_axis"] == [700, 850, 950]
+    assert c["rpm_axis"][-1] == 5300
+    peak = max(result["graph"]["points"], key=lambda p: p["ori_torque_nm"])
+    assert (peak["rpm"], peak["ori_torque_nm"]) == (2250, 456.0)
 
 
 def test_jaguar_flags_per_gear_copies_and_removed_limits():
@@ -171,6 +188,7 @@ def test_size_mismatch_is_rejected():
     ("Delphi_DCM6.2_ori.bin", "dcm6_2"),
     ("seat_edc17c64_bench_int_flash.bin", "edc17c64"),
     ("fomoco_bosch_edc17cp55_flexray_obd_maps.bin", "edc17cp55"),
+    ("edc16u1_20261005210329_Ori_ext_flash.bin", "edc16"),
     ("Seat_Ibiza_1.4i_16v_Marelli_IAW_4HV_OBD_ORI.bin", "marelli_iaw"),
 ])
 def test_profile_matches_whole_words(filename, key):

@@ -785,14 +785,18 @@ def detect_dcm6_2_torque_map(ori, stage):
 
 
 
-# Bosch EDC17 diesel torque limiters stored with inline axes:
+# Bosch EDC16/EDC17 diesel torque limiters stored with inline axes:
 #   map   (Map_Xs16Ys16Ws16):  [n_pressure, n_rpm, pressure axis (hPa), rpm axis, values]
 #   curve (Kl_Xs16Ws16):       [n_rpm, rpm axis, values]
 # All words are signed 16-bit. A map holds one RPM curve per pressure point
-# (COLUMN_DIR). The VAG EDC17C46 A2L defines the conversions for
-# EngPrt_trqLimP_MAP as EngN raw = 2 * rpm and Trq raw = 10 * Nm, and the same
-# scaling matches the JLR EDC17CP55 limiter curves.
-BOSCH_RPM_PER_COUNT = 0.5
+# (COLUMN_DIR). Trq raw = 10 * Nm in both families. The byte order and engine
+# speed scaling differ, per the A2Ls:
+#   EDC17 (VAG EDC17C46, also JLR EDC17CP55): little-endian, EngN raw = 2 * rpm
+#   EDC16 (VAG EDC16U R5 TDI):                big-endian,    EngN raw = rpm
+BOSCH_LAYOUTS = (
+    {"family": "EDC17", "endian": "<", "rpm_per_count": 0.5},
+    {"family": "EDC16", "endian": ">", "rpm_per_count": 1.0},
+)
 BOSCH_NM_PER_COUNT = 0.1
 # Stage 1 files often "remove" a limiter by setting it to 1000 Nm.
 BOSCH_MAX_TORQUE_RAW = 10000
@@ -804,10 +808,9 @@ def _increasing(v):
     return all(a < b for a, b in zip(v, v[1:]))
 
 
-def _rpm_axis_ok(rpm_raw):
+def _rpm_axis_ok(rpm):
     # 0-1500 rpm at the start, 3500-7000 rpm at the end.
-    return (0 <= rpm_raw[0] <= 3000 and 7000 <= rpm_raw[-1] <= 14000
-            and _increasing(rpm_raw))
+    return 0 <= rpm[0] <= 1500 and 3500 <= rpm[-1] <= 7000 and _increasing(rpm)
 
 
 def _torque_values_ok(values):
@@ -815,56 +818,62 @@ def _torque_values_ok(values):
             and max(values) >= 1500)
 
 
-def read_pressure_torque_map(data, off):
+def read_pressure_torque_map(data, off, layout=BOSCH_LAYOUTS[0]):
     """Parse an inline Bosch pressure x RPM torque map at off, or return None."""
     if off + 4 > len(data):
         return None
-    nx, ny = struct.unpack_from("<hh", data, off)
+    e = layout["endian"]
+    nx, ny = struct.unpack_from(e + "hh", data, off)
     if not (2 <= nx <= _BOSCH_MAX_X and 8 <= ny <= _BOSCH_MAX_Y):
         return None
     end = off + 4 + 2 * (nx + ny) + 2 * nx * ny
     if end > len(data):
         return None
-    words = struct.unpack_from(f"<{nx + ny + nx * ny}h", data, off + 4)
+    words = struct.unpack_from(f"{e}{nx + ny + nx * ny}h", data, off + 4)
     pressure, rpm_raw, values = words[:nx], words[nx:nx + ny], words[nx + ny:]
+    rpm = [r * layout["rpm_per_count"] for r in rpm_raw]
     if not (400 <= pressure[0] and pressure[-1] <= 1200 and _increasing(pressure)):
         return None
-    if not _rpm_axis_ok(rpm_raw) or not _torque_values_ok(values):
+    if not _rpm_axis_ok(rpm) or not _torque_values_ok(values):
         return None
     return {
         "kind": "map",
+        "layout": layout,
         "offset": off,
         "values_offset": off + 4 + 2 * (nx + ny),
         "axis_offset": off + 4 + 2 * nx,
         "end": end,
         "pressure": list(pressure),
-        "rpm": [r * BOSCH_RPM_PER_COUNT for r in rpm_raw],
+        "rpm": rpm,
         "rows": [list(values[i * ny:(i + 1) * ny]) for i in range(nx)],
     }
 
 
-def read_torque_curve(data, off):
+def read_torque_curve(data, off, layout=BOSCH_LAYOUTS[0]):
     """Parse an inline Bosch RPM torque curve at off, or return None."""
     if off + 2 > len(data):
         return None
-    (n,) = struct.unpack_from("<h", data, off)
+    e = layout["endian"]
+    (n,) = struct.unpack_from(e + "h", data, off)
     if not 8 <= n <= _BOSCH_MAX_Y:
         return None
     end = off + 2 + 4 * n
     if end > len(data):
         return None
-    words = struct.unpack_from(f"<{2 * n}h", data, off + 2)
+    words = struct.unpack_from(f"{e}{2 * n}h", data, off + 2)
     rpm_raw, values = words[:n], words[n:]
-    if not _rpm_axis_ok(rpm_raw) or not _torque_values_ok(values):
+    rpm = [r * layout["rpm_per_count"] for r in rpm_raw]
+    if not _rpm_axis_ok(rpm) or not _torque_values_ok(values):
         return None
     return {
         "kind": "curve",
+        "layout": layout,
         "offset": off,
         "values_offset": off + 2 + 2 * n,
         "axis_offset": off + 2,
         "end": end,
         "pressure": [],
-        "rpm": [r * BOSCH_RPM_PER_COUNT for r in rpm_raw],
+        "rpm": rpm,
         "rows": [list(values)],
     }
 
@@ -951,7 +960,8 @@ def _bosch_limiter_result(o, s):
         "scale": BOSCH_NM_PER_COUNT,
         "scale_confidence": 98.0,
         "scale_source": "damos",
-        "endian": "little",
+        "endian": "little" if o["layout"]["endian"] == "<" else "big",
+        "ecu_family": o["layout"]["family"],
         "layout": "bosch_inline_map" if is_map else "bosch_inline_curve",
         "orientation": "columns",
         "secondary_axis": [],
@@ -1031,11 +1041,12 @@ def detect_bosch_pressure_torque_limiters(ori, stage):
     for off in offsets:
         if off < last_end:
             continue
-        for reader in (read_pressure_torque_map, read_torque_curve):
-            o = reader(ori, off)
+        for layout, reader in ((l, r) for l in BOSCH_LAYOUTS
+                               for r in (read_pressure_torque_map, read_torque_curve)):
+            o = reader(ori, off, layout)
             if not o or not has_change(diffs, off, o["end"]):
                 continue
-            s = reader(stage, off)
+            s = reader(stage, off, layout)
             if not s or (len(s["rows"]), len(s["rpm"])) != (len(o["rows"]), len(o["rpm"])):
                 continue
             result = _bosch_limiter_result(o, s)
