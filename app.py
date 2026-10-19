@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import html
-import tempfile
-from pathlib import Path
+import traceback
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from analyzer import analyse as analyse_bin
+from analyzer import ANALYSER_VERSION, analyse as analyse_bin
 
 
 app = FastAPI(
     title="Nightfall BIN Analyser",
-    version="0.3.0",
+    version=ANALYSER_VERSION,
 )
 
 
@@ -21,40 +19,33 @@ def health():
     return {
         "ok": True,
         "service": "nightfall-bin-analyser",
-        "version": "0.3.0",
+        "version": ANALYSER_VERSION,
     }
 
 
+# A plain (non-async) endpoint: analysis is CPU-bound, so FastAPI runs it in
+# its thread pool rather than blocking the event loop for every other request.
 @app.post("/analyse")
-async def analyse(
+def analyse(
     ori: UploadFile = File(...),
     stage1: UploadFile = File(...),
 ):
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-
-            ori_path = temp / "ori.bin"
-            stage_path = temp / "stage1.bin"
-
-            ori_bytes = await ori.read()
-            stage_bytes = await stage1.read()
-
-            ori_path.write_bytes(ori_bytes)
-            stage_path.write_bytes(stage_bytes)
-
-            result = analyse_bin(
-                ori_bytes,
-                stage_bytes,
-                ori.filename or "",
-                stage1.filename or "",
-            )
-
+        result = analyse_bin(
+            ori.file.read(),
+            stage1.file.read(),
+            ori.filename or "",
+            stage1.filename or "",
+        )
         return JSONResponse(result)
 
-    except Exception as exc:
-        import traceback
+    except ValueError as exc:
+        return JSONResponse(
+            {"ok": False, "message": str(exc)},
+            status_code=400,
+        )
 
+    except Exception as exc:
         traceback.print_exc()
 
         return JSONResponse(
@@ -908,10 +899,13 @@ function renderReviewState(result) {
     document.getElementById("peak-torque").textContent = "—";
     mapSelectorNote.textContent = result.message || "No graphable candidate was returned.";
 
-    document.getElementById("chart").innerHTML = `
+    const chart = document.getElementById("chart");
+    chart.innerHTML = `
         <text x="500" y="220" text-anchor="middle" font-size="28" fill="#eceff4">Review required</text>
-        <text x="500" y="265" text-anchor="middle" font-size="17" fill="#d8dee9">${result.message || "No automatic torque graph was generated."}</text>
+        <text x="500" y="265" text-anchor="middle" font-size="17" fill="#d8dee9"></text>
     `;
+    chart.querySelectorAll("text")[1].textContent =
+        result.message || "No automatic torque graph was generated.";
 
     document.getElementById("data-table").innerHTML = `
         <tr><td colspan="4">Select a map candidate above if one is available.</td></tr>

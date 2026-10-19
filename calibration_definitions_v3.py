@@ -26,9 +26,26 @@ class ECUProfile:
     secondary: tuple[CalibrationDefinition, ...]
     exclusions: tuple[str, ...]
     notes: str
+    # False for pre-torque-model ECUs, which have no torque limiter to graph.
+    torque_model: bool = True
 
 
 PROFILES = (
+    ECUProfile(
+        key="marelli_iaw",
+        label="Magneti Marelli IAW",
+        family="Magneti Marelli IAW",
+        match_terms=("marelli", "iaw"),
+        primary=(),
+        secondary=(),
+        exclusions=(),
+        notes=(
+            "Early-2000s petrol ECU without a torque model. Tunes change "
+            "fuelling, ignition and load tables, so there is no torque "
+            "limiter to graph."
+        ),
+        torque_model=False,
+    ),
     ECUProfile(
         key="dcm6_2",
         label="Delphi DCM6.2",
@@ -75,6 +92,51 @@ PROFILES = (
         ),),
         exclusions=(),
         notes="The Damos contains many torque-management functions. Prefer the documented maximum-torque limitation definition over generic torque maps.",
+    ),
+    ECUProfile(
+        key="edc17c64",
+        label="Bosch EDC17C64",
+        family="Bosch EDC17C64",
+        match_terms=("edc17c64",),
+        primary=(CalibrationDefinition(
+            name="EngPrt_trqLimP_MAP",
+            purpose="Engine-protection torque limit over ambient pressure and engine speed",
+            units="Nm (raw / 10)",
+            axis_notes="Inline Map_Xs16Ys16Ws16: ambient pressure (hPa) x engine speed (raw / 2 = rpm).",
+            role="primary_torque_limit",
+            include_terms=("trqlimp_map",),
+        ),),
+        secondary=(CalibrationDefinition(
+            name="EngPrt_trqLimPBoost_MAP",
+            purpose="Engine-protection torque limit with boost active",
+            units="Nm (raw / 10)",
+            axis_notes="Same layout as EngPrt_trqLimP_MAP.",
+            role="secondary_torque_limit",
+        ),),
+        exclusions=(),
+        notes="Layout and scaling taken from the VAG EDC17C46 2.0 TDI A2L, which shares this map with EDC17C64.",
+    ),
+    ECUProfile(
+        key="edc17cp55",
+        label="Bosch EDC17CP55 (JLR)",
+        family="Bosch EDC17CP55",
+        match_terms=("edc17cp55",),
+        primary=(CalibrationDefinition(
+            name="Engine torque limit curve",
+            purpose="Maximum engine torque over engine speed",
+            units="Nm (raw / 10)",
+            axis_notes="Inline Kl_Xs16Ws16 curve; engine speed raw / 2 = rpm. No A2L available, layout inferred from the BIN.",
+            role="primary_torque_limit_candidate",
+        ),),
+        secondary=(CalibrationDefinition(
+            name="Per-gear torque limit curves",
+            purpose="Torque limits repeated once per gear",
+            units="Nm (raw / 10)",
+            axis_notes="Identical inline curves, one per gear.",
+            role="secondary_torque_limit",
+        ),),
+        exclusions=(),
+        notes="Stage 1 files commonly remove the pressure and temperature limiters by setting them to 1000 Nm.",
     ),
     ECUProfile(
         key="edc17c41",
@@ -133,7 +195,7 @@ PROFILES = (
         key="mev1746_n20",
         label="BMW N20 MEV17.4.6",
         family="BMW MEV17.4.6",
-        match_terms=("mev1746", "mev17.4.6", "n20", "184hp"),
+        match_terms=("mev1746", "mev17.4.6", "n20", "n20b20", "184hp"),
         primary=(CalibrationDefinition(
             name="maximales Maschinendrehmoment",
             purpose="Maximum machine/engine torque",
@@ -163,7 +225,9 @@ def identify_profile(*names: Optional[str]) -> dict:
     haystack = _norm(" ".join(n or "" for n in names))
     scored = []
     for p in PROFILES:
-        hits = [t for t in p.match_terms if _norm(t) in haystack]
+        # Match whole words only, so "f10" doesn't match "f100" and "n20"
+        # doesn't match "n2000".
+        hits = [t for t in p.match_terms if f" {_norm(t)} " in f" {haystack} "]
         if hits:
             scored.append((len(hits), p))
     if not scored:

@@ -2,11 +2,35 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Optional
+from bisect import bisect_left, bisect_right
 import struct
-from statistics import median
 
 RPM_MIN, RPM_MAX = 250, 12000
 MIN_AXIS_LEN, MAX_AXIS_LEN = 8, 32
+# Graph from just above idle up to ~7000 RPM: road engines rarely rev past
+# that and many diesels redline around 5000-5500 RPM. Axes often carry
+# breakpoints beyond redline, but those are not meaningful torque values.
+GRAPH_RPM_MIN = 1000
+GRAPH_RPM_MAX = 7000
+# Peak torque above this from a generic (no ECU profile scale) candidate means
+# the map or the guessed scale is wrong.
+GENERIC_MAX_TORQUE_NM = 1000
+
+
+def changed_offsets(a, b, chunk=4096):
+    """Return the sorted byte offsets where two equal-length BINs differ."""
+    out = []
+    for base in range(0, min(len(a), len(b)), chunk):
+        if a[base:base+chunk] != b[base:base+chunk]:
+            out.extend(base + i for i, (x, y) in
+                       enumerate(zip(a[base:base+chunk], b[base:base+chunk])) if x != y)
+    return out
+
+
+def has_change(diffs, start, end):
+    """True when any changed byte offset lies in [start, end)."""
+    i = bisect_left(diffs, start)
+    return i < len(diffs) and diffs[i] < end
 
 
 @dataclass
@@ -143,6 +167,7 @@ def parse_contiguous(data, stage, axis_start, axis, endian):
         table=axis_start+cols*2+skip*2
         for rows in row_counts:
             if table+rows*cols*2>len(data): continue
+            if data[table:table+rows*cols*2]==stage[table:table+rows*cols*2]: continue
             ot=read_u16(data,table,rows*cols,endian)
             st=read_u16(stage,table,rows*cols,endian)
             ot=[ot[i*cols:(i+1)*cols] for i in range(rows)]
@@ -165,6 +190,7 @@ def parse_interleaved(data, stage, axis_start, axis, endian):
     base=axis_start+cols*2
     for rows in range(2,9):
         if base+rows*(cols+1)*2>len(data): continue
+        if data[base:base+rows*(cols+1)*2]==stage[base:base+rows*(cols+1)*2]: continue
         rowaxis=[]; ot=[]; st=[]
         p=base
         ok=True
@@ -191,6 +217,7 @@ def parse_trailing_row_axis(data, stage, axis_start, axis, endian):
         base=axis_start+cols*2+skip*2
         for rows in range(2,9):
             if base+rows*(cols+1)*2>len(data): continue
+            if data[base:base+rows*(cols+1)*2]==stage[base:base+rows*(cols+1)*2]: continue
             rowaxis=[]; ot=[]; st=[]
             p=base; ok=True
             for _ in range(rows):
@@ -279,22 +306,27 @@ def axis_quality(axis, base_conf):
 
 def choose_torque_scale(table):
     """Choose a plausible raw->Nm calibration scale from common ECU scalings."""
-    vals=[x for row in table for x in row if x > 0]
+    vals=sorted(x for row in table for x in row if x > 0)
     if not vals:
         return 0.1, 0.0
+    n=len(vals)
     options=(0.01, 0.05, 0.1, 0.125, 0.2, 0.25, 0.5, 1.0)
     best_scale=0.1; best_score=-1.0
     for scale in options:
-        nm=[x*scale for x in vals]
-        in_band=sum(120 <= x <= 1200 for x in nm)/len(nm)
-        usable=sum(50 <= x <= 1500 for x in nm)/len(nm)
-        too_high=sum(x > 1500 for x in nm)/len(nm)
-        too_low=sum(x < 50 for x in nm)/len(nm)
+        # vals is sorted, so count Nm bands by binary search rather than
+        # rescanning every cell for every scale.
+        key=lambda x: x*scale
+        below=lambda nm: bisect_left(vals, nm, key=key)
+        upto=lambda nm: bisect_right(vals, nm, key=key)
+        in_band=(upto(1200)-below(120))/n
+        usable=(upto(1500)-below(50))/n
+        too_high=(n-upto(1500))/n
+        too_low=below(50)/n
         # Torque maps normally contain a useful spread rather than one tiny
         # cluster. Reward a sensible median and penalise implausible extremes.
-        med=median(nm)
+        med=vals[n//2]*scale if n%2 else (vals[n//2-1]*scale+vals[n//2]*scale)/2
         median_score=1.0 if 180 <= med <= 900 else max(0.0, 1.0-abs(med-500)/900)
-        spread=(max(nm)-min(nm))/max(1.0,max(nm))
+        spread=(vals[-1]*scale-vals[0]*scale)/max(1.0,vals[-1]*scale)
         spread_score=min(1.0, spread/0.45)
         score=(0.45*in_band + 0.20*usable + 0.20*median_score
                + 0.15*spread_score - 0.35*too_high - 0.20*too_low)
@@ -478,9 +510,16 @@ def make_candidate(item, axis_start, axis, axis_conf, endian, source_data=None):
 
 def build_candidates(ori,stage,max_candidates=30):
     if len(ori)!=len(stage): raise ValueError("ORI and Stage 1 BIN sizes must match.")
+    diffs=changed_offsets(ori,stage)
     candidates=[]
     for endian in ("<",">"):
         for full_start,full_axis,conf,leading_zero in find_axes(ori,endian):
+            # Furthest any parser reads past the axis: 4 padding words plus
+            # up to max(8, cols) rows of (cols + 1) words.
+            n=len(full_axis)
+            reach=full_start+n*2+10+max(8,n)*(n+1)*2
+            if not has_change(diffs,full_start,reach):
+                continue
             # A long monotonic sequence can contain a shorter, real axis suffix.
             # Try suffixes because some ECUs store several unrelated breakpoints
             # before the actual map axis.
@@ -494,13 +533,17 @@ def build_candidates(ori,stage,max_candidates=30):
                              + list(parse_trailing_row_axis(ori,stage,axis_start,axis,endian))):
                     candidates.append(make_candidate(item,axis_start,axis,conf,endian,ori))
     candidates.sort(key=lambda x:x.score,reverse=True)
-    unique=[]; seen=set()
+    # The padding-skip and axis-suffix searches find the same table several
+    # times at slightly shifted offsets. Real maps don't overlap in memory, so
+    # keep only the best-scoring candidate for each region.
+    unique=[]; taken=[]
     for c in candidates:
-        key=(c.table_offset,c.rows,c.columns,c.layout,c.endian)
-        if key in seen: continue
-        seen.add(key); unique.append(c)
+        start,end=candidate_span(vars(c))
+        if any(start<e and s<end for s,e in taken): continue
+        taken.append((start,end)); unique.append(c)
         if len(unique)>=max_candidates: break
     return [asdict(c) for c in unique]
+
 
 
 def graph_candidate(ori,stage,c):
@@ -553,7 +596,7 @@ def graph_candidate(ori,stage,c):
     for rpm,o,s in zip(curve_rpm,curve_ori,curve_stage):
         on=o*scale
         sn=s*scale
-        if 500<=rpm<=12000 and (on>0 or sn>0) and on<=1500 and sn<=1500:
+        if GRAPH_RPM_MIN<=rpm<=12000 and (on>0 or sn>0) and on<=1500 and sn<=1500:
             points.append({
                 "rpm":rpm,
                 "ori_torque_nm":round(on,1),
@@ -570,22 +613,13 @@ def graph_candidate(ori,stage,c):
                 points = points[:idx]
             break
 
-    # Clean suspicious high-RPM tails without imposing a fixed diesel/petrol
-    # cutoff. If the detected axis runs beyond 9000 RPM and the curve has
-    # already fallen well below its peak, treat the remaining tail as
-    # suspicious metadata/another breakpoint rather than graphing it.
+    # Breakpoints beyond redline are not meaningful torque values, so stop
+    # the graph at GRAPH_RPM_MAX.
     stop_reason = "detected_axis_end"
-    if points:
-        peak_stage = max(p["stage_torque_nm"] for p in points)
-        if points[-1]["rpm"] > 9000 and peak_stage > 0:
-            end_stage = points[-1]["stage_torque_nm"]
-            if end_stage < peak_stage * 0.75:
-                cutoff = [p for p in points if p["rpm"] <= 9000]
-                if len(cutoff) >= 3:
-                    points = cutoff
-                    stop_reason = "high_rpm_tail_filtered"
-        if stop_reason == "detected_axis_end" and points[-1]["rpm"] > 9000:
-            stop_reason = "high_rpm_axis_retained"
+    capped = [p for p in points if p["rpm"] <= GRAPH_RPM_MAX]
+    if len(capped) < len(points):
+        points = capped
+        stop_reason = "redline_cap"
 
     return {
         "row_index":best,
@@ -751,111 +785,294 @@ def detect_dcm6_2_torque_map(ori, stage):
 
 
 
-def detect_edc17cp14_max_torque_map(ori, stage):
-    """Conservative EDC17CP14-specific detector for the documented maximum
-    torque limitation (`r Maximaldrehmomentbegrenzung`).
+# Bosch EDC17 diesel torque limiters stored with inline axes:
+#   map   (Map_Xs16Ys16Ws16):  [n_pressure, n_rpm, pressure axis (hPa), rpm axis, values]
+#   curve (Kl_Xs16Ws16):       [n_rpm, rpm axis, values]
+# All words are signed 16-bit. A map holds one RPM curve per pressure point
+# (COLUMN_DIR). The VAG EDC17C46 A2L defines the conversions for
+# EngPrt_trqLimP_MAP as EngN raw = 2 * rpm and Trq raw = 10 * Nm, and the same
+# scaling matches the JLR EDC17CP55 limiter curves.
+BOSCH_RPM_PER_COUNT = 0.5
+BOSCH_NM_PER_COUNT = 0.1
+# Stage 1 files often "remove" a limiter by setting it to 1000 Nm.
+BOSCH_MAX_TORQUE_RAW = 10000
+_BOSCH_MAX_X, _BOSCH_MAX_Y = 16, 32
+_BOSCH_MAX_SPAN = 4 + 2 * (_BOSCH_MAX_X + _BOSCH_MAX_Y) + 2 * _BOSCH_MAX_X * _BOSCH_MAX_Y
 
-    It deliberately outranks the generic detector for the EDC17CP14 profile,
-    but only returns a graph when a characteristic 10-point limiter segment is
-    found in both files with a coherent Stage 1 increase.
-    """
-    axis_values = [2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000]
-    expected_ori = [3800, 3800, 3800, 3750, 3750, 3700, 3650, 3550, 3450, 3250]
 
-    hits = []
-    max_off = min(len(ori), len(stage)) - 20
-    for off in range(0, max_off, 2):
-        try:
-            o = list(struct.unpack_from("<10H", ori, off))
-            s = list(struct.unpack_from("<10H", stage, off))
-        except struct.error:
-            break
+def _increasing(v):
+    return all(a < b for a, b in zip(v, v[1:]))
 
-        shape_error = sum(abs(a-b) for a, b in zip(o, expected_ori))
-        if shape_error > 700:
-            continue
-        if not all(2500 <= v <= 4500 for v in o):
-            continue
 
-        deltas = [b-a for a, b in zip(o, s)]
-        positive = sum(d > 100 for d in deltas)
-        if positive < 7:
-            continue
-        if not all(3000 <= v <= 5000 for v in s):
-            continue
+def _rpm_axis_ok(rpm_raw):
+    # 0-1500 rpm at the start, 3500-7000 rpm at the end.
+    return (0 <= rpm_raw[0] <= 3000 and 7000 <= rpm_raw[-1] <= 14000
+            and _increasing(rpm_raw))
 
-        stage_rise = sum(s[i] >= s[i-1] for i in range(1, 10))
-        if stage_rise < 6:
-            continue
 
-        gain = sum(max(0, d) for d in deltas)
-        score = 100.0 - (shape_error / 70.0) + min(gain / 100.0, 20.0)
-        hits.append((score, off, o, s))
+def _torque_values_ok(values):
+    return (min(values) >= 0 and max(values) <= BOSCH_MAX_TORQUE_RAW
+            and max(values) >= 1500)
 
-    if not hits:
+
+def read_pressure_torque_map(data, off):
+    """Parse an inline Bosch pressure x RPM torque map at off, or return None."""
+    if off + 4 > len(data):
         return None
+    nx, ny = struct.unpack_from("<hh", data, off)
+    if not (2 <= nx <= _BOSCH_MAX_X and 8 <= ny <= _BOSCH_MAX_Y):
+        return None
+    end = off + 4 + 2 * (nx + ny) + 2 * nx * ny
+    if end > len(data):
+        return None
+    words = struct.unpack_from(f"<{nx + ny + nx * ny}h", data, off + 4)
+    pressure, rpm_raw, values = words[:nx], words[nx:nx + ny], words[nx + ny:]
+    if not (400 <= pressure[0] and pressure[-1] <= 1200 and _increasing(pressure)):
+        return None
+    if not _rpm_axis_ok(rpm_raw) or not _torque_values_ok(values):
+        return None
+    return {
+        "kind": "map",
+        "offset": off,
+        "values_offset": off + 4 + 2 * (nx + ny),
+        "axis_offset": off + 4 + 2 * nx,
+        "end": end,
+        "pressure": list(pressure),
+        "rpm": [r * BOSCH_RPM_PER_COUNT for r in rpm_raw],
+        "rows": [list(values[i * ny:(i + 1) * ny]) for i in range(nx)],
+    }
 
-    _, table_off, o, s = max(hits, key=lambda x: x[0])
-    scale = 0.1
-    points = []
-    for rpm, ov, sv in zip(axis_values, o, s):
-        points.append({
-            "x": rpm,
-            "rpm": rpm,
-            "ori_torque_nm": round(ov * scale, 1),
-            "stage_torque_nm": round(sv * scale, 1),
-            "gain_nm": round((sv - ov) * scale, 1),
-        })
+
+def read_torque_curve(data, off):
+    """Parse an inline Bosch RPM torque curve at off, or return None."""
+    if off + 2 > len(data):
+        return None
+    (n,) = struct.unpack_from("<h", data, off)
+    if not 8 <= n <= _BOSCH_MAX_Y:
+        return None
+    end = off + 2 + 4 * n
+    if end > len(data):
+        return None
+    words = struct.unpack_from(f"<{2 * n}h", data, off + 2)
+    rpm_raw, values = words[:n], words[n:]
+    if not _rpm_axis_ok(rpm_raw) or not _torque_values_ok(values):
+        return None
+    return {
+        "kind": "curve",
+        "offset": off,
+        "values_offset": off + 2 + 2 * n,
+        "axis_offset": off + 2,
+        "end": end,
+        "pressure": [],
+        "rpm": [r * BOSCH_RPM_PER_COUNT for r in rpm_raw],
+        "rows": [list(values)],
+    }
+
+
+def _interp(xs, ys, x):
+    """Linear interpolation, clamped at the axis ends as the ECU does."""
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    i = bisect_right(xs, x)
+    x0, x1, y0, y1 = xs[i - 1], xs[i], ys[i - 1], ys[i]
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+
+def _bosch_limiter_result(o, s):
+    def curve(r):
+        points = []
+        for rpm, ov in zip(o["rpm"], o["rows"][r]):
+            if not GRAPH_RPM_MIN <= rpm <= GRAPH_RPM_MAX:
+                continue
+            # Unused trailing breakpoints are padded with +1 steps
+            # (e.g. 11000, 11001, 11002 raw).
+            if points and rpm - points[-1]["rpm"] < 10:
+                continue
+            # Stage 1 files sometimes move the RPM breakpoints, so read the
+            # Stage 1 curve on its own axis.
+            sv = _interp(s["rpm"], s["rows"][r], rpm)
+            on, sn = ov * BOSCH_NM_PER_COUNT, sv * BOSCH_NM_PER_COUNT
+            points.append({
+                "x": rpm,
+                "rpm": rpm,
+                "ori_torque_nm": round(on, 1),
+                "stage_torque_nm": round(sn, 1),
+                "gain_nm": round(sn - on, 1),
+            })
+        # Past fuel cut both files are zero; keep only the first such point.
+        while (len(points) >= 2 and not any(
+                p["ori_torque_nm"] or p["stage_torque_nm"] for p in points[-2:])):
+            points.pop()
+        return points
+
+    is_map = o["kind"] == "map"
+    nx, ny = len(o["rows"]), len(o["rpm"])
+    if is_map:
+        curves = [
+            {"label": f"{p} hPa", "points": curve(r)}
+            for r, p in enumerate(o["pressure"])
+        ]
+    else:
+        curves = [{"label": "RPM curve", "points": curve(0)}]
+    # For a map the highest pressure point covers sea level and is the limit
+    # that applies in normal driving.
+    points = curves[-1]["points"]
+    ori_cells = [v for row in o["rows"] for v in row]
+    stage_cells = [v for row in s["rows"] for v in row]
+    changed = sum(a != b for a, b in zip(ori_cells, stage_cells))
+    rpm_axis = [int(r) if r == int(r) else r for r in o["rpm"]]
+
+    peak_ori = max((p["ori_torque_nm"] for p in points), default=0)
+    peak_stage = max((p["stage_torque_nm"] for p in points), default=0)
+    stage_values = {p["stage_torque_nm"] for p in points}
+    # The tune disabled this limiter if Stage 1 is a flat line above stock or
+    # reaches the 1000 Nm "no limit" value.
+    removed = ((len(stage_values) == 1 and peak_stage > peak_ori)
+               or peak_stage >= BOSCH_MAX_TORQUE_RAW * BOSCH_NM_PER_COUNT)
+    warnings = ["limit_removed_in_stage1"] if removed else []
 
     candidate = {
-        "offset": table_off,
-        "rows": 1,
-        "columns": 10,
-        "axis_offset": None,
-        "table_offset": table_off,
-        "row_axis_offset": None,
-        "row_axis": [],
-        "rpm_axis": axis_values,
+        "offset": o["values_offset"],
+        "rows": nx,
+        "columns": ny,
+        "axis_offset": o["axis_offset"],
+        "table_offset": o["values_offset"],
+        "row_axis_offset": o["offset"] + 4 if is_map else None,
+        "row_axis": o["pressure"],
+        "rpm_axis": rpm_axis,
         "score": 99.0,
-        "axis_confidence": 98.0,
-        "map_confidence": 96.0,
-        "difference_percent": round(100.0 * sum(a != b for a, b in zip(o, s)) / len(o), 1),
-        "modified_cells": sum(a != b for a, b in zip(o, s)),
-        "total_cells": len(o),
-        "scale": scale,
+        "axis_confidence": 99.0,
+        "map_confidence": 98.0,
+        "difference_percent": round(100.0 * changed / len(ori_cells), 1),
+        "modified_cells": changed,
+        "total_cells": len(ori_cells),
+        "scale": BOSCH_NM_PER_COUNT,
         "scale_confidence": 98.0,
+        "scale_source": "damos",
         "endian": "little",
-        "layout": "profile_specific",
+        "layout": "bosch_inline_map" if is_map else "bosch_inline_curve",
         "orientation": "columns",
         "secondary_axis": [],
         "secondary_axis_offset": None,
-        "warnings": [],
+        "warnings": warnings,
         "curve_quality": 98.0,
         "stage_saturation": 0.0,
+        "copies": 1,
+        "copy_offsets": [o["values_offset"]],
     }
+    graph = {
+        "row_index": nx - 1,
+        "row_axis_value": o["pressure"][-1] if is_map else None,
+        "points": points,
+        "curves": curves,
+        "range": {
+            "start_rpm": points[0]["rpm"] if points else None,
+            "end_rpm": points[-1]["rpm"] if points else None,
+            "point_count": len(points),
+            "stop_reason": "graph_rpm_window",
+        },
+        "scale": BOSCH_NM_PER_COUNT,
+        "scale_confidence": 98.0,
+        "x_label": "RPM",
+        "x_key": "rpm",
+    }
+    summary = {
+        "peak_ori": peak_ori,
+        "peak_stage1": peak_stage,
+        "peak_gain": max((p["gain_nm"] for p in points), default=0),
+        "rows": nx,
+        "columns": ny,
+    }
+    return {"candidate": candidate, "graph": graph, "summary": summary,
+            "span": (o["offset"], o["end"]), "removed": removed,
+            "signature": (o["kind"], tuple(o["rpm"]), tuple(map(tuple, o["rows"])),
+                          tuple(s["rpm"]), tuple(map(tuple, s["rows"])))}
 
-    return {
-        "candidate": candidate,
-        "graph": {
-            "points": points,
-            "range": {
-                "start_rpm": axis_values[0],
-                "end_rpm": axis_values[-1],
-                "point_count": len(points),
-                "stop_reason": "profile_specific_limiter",
-            },
-            "scale": scale,
-            "scale_confidence": 98.0,
-            "x_label": "RPM",
-            "x_key": "rpm",
-        },
-        "summary": {
-            "peak_stage1": round(max(p["stage_torque_nm"] for p in points), 1),
-            "peak_gain": round(max(p["gain_nm"] for p in points), 1),
-            "rows": 1,
-            "columns": 10,
-        },
-    }
+
+def _limiter_rank(r):
+    """Sort key: most likely main limiter first.
+
+    Prefer limiters that Stage 1 actually raised (not removed, and not just
+    a filled-in tail), then a single map over sets of identical copies (which
+    are usually per-gear limits), then the highest stock torque, then the
+    lowest address.
+    """
+    s = r["summary"]
+    raised = s["peak_stage1"] > s["peak_ori"]
+    return (r["removed"], not raised, r["candidate"]["copies"] > 1,
+            -s["peak_ori"], r["span"][0])
+
+
+def detect_bosch_pressure_torque_limiters(ori, stage):
+    """Find changed Bosch inline torque limiters (pressure x RPM maps and RPM
+    curves), merging identical copies.
+
+    Returns a list of results, most likely main limiter first, or an empty
+    list.
+    """
+    if len(ori) != len(stage):
+        return []
+    diffs = changed_offsets(ori, stage)
+    regions = []
+    for d in diffs:
+        if regions and d - regions[-1][1] <= 64:
+            regions[-1][1] = d
+        else:
+            regions.append([d, d])
+    offsets = sorted({
+        off for a, b in regions
+        for off in range(max(0, a - _BOSCH_MAX_SPAN) & ~1, b + 1, 2)
+    })
+
+    results = {}
+    last_end = -1
+    for off in offsets:
+        if off < last_end:
+            continue
+        for reader in (read_pressure_torque_map, read_torque_curve):
+            o = reader(ori, off)
+            if not o or not has_change(diffs, off, o["end"]):
+                continue
+            s = reader(stage, off)
+            if not s or (len(s["rows"]), len(s["rpm"])) != (len(o["rows"]), len(o["rpm"])):
+                continue
+            result = _bosch_limiter_result(o, s)
+            if len(result["graph"]["points"]) < 6:
+                continue
+            last_end = o["end"]
+            same = results.get(result["signature"])
+            if same:
+                same["candidate"]["copies"] += 1
+                same["candidate"]["copy_offsets"].append(o["values_offset"])
+            else:
+                results[result["signature"]] = result
+            break
+
+    return sorted(results.values(), key=_limiter_rank)
+
+
+def describe_limiter(r):
+    c = r["candidate"]
+    if c["layout"] == "bosch_inline_map":
+        text = (f"{c['rows']} × {c['columns']} pressure × RPM map at "
+                f"0x{c['table_offset']:X}; {r['graph']['row_axis_value']} hPa row shown")
+    else:
+        text = f"{c['columns']}-point RPM curve at 0x{c['table_offset']:X}"
+    if c["copies"] > 1:
+        text += f"; {c['copies']} identical copies (often one per gear)"
+    if r["removed"]:
+        text += "; limit removed in Stage 1"
+    return text
+
+
+def candidate_span(c):
+    if c.get("layout") in ("interleaved", "trailing_interleaved"):
+        size = c["rows"] * (c["columns"] + 1) * 2
+    else:
+        size = c["rows"] * c["columns"] * 2
+    return c["table_offset"], c["table_offset"] + size
 
 
 def _candidate_key(c):
@@ -903,12 +1120,13 @@ def torque_candidate_plausible(profile_key, graph):
         # structures, never as displayed torque values.
         return (100 <= peak <= 650 and low >= 0 and changed >= 3)
 
-    return True
+    return peak <= GENERIC_MAX_TORQUE_NM
 
 
 def build_map_options(ori, stage, preferred=None, preferred_graph=None,
                       preferred_label=None, preferred_note=None,
-                      generic_candidates=None, profile_key="generic", limit=3):
+                      generic_candidates=None, profile_key="generic", limit=3,
+                      profile_alternatives=()):
     """Return up to three selectable map candidates with pre-built graphs.
 
     A Damos/profile-specific candidate is placed first when available. Other
@@ -916,10 +1134,12 @@ def build_map_options(ori, stage, preferred=None, preferred_graph=None,
     """
     options = []
     seen = set()
+    taken = []
 
     if preferred is not None and preferred_graph is not None:
         key = _candidate_key(preferred)
         seen.add(key)
+        taken.append(candidate_span(preferred))
         options.append({
             "id": "candidate_1",
             "label": preferred_label or "Recommended map",
@@ -931,6 +1151,23 @@ def build_map_options(ori, stage, preferred=None, preferred_graph=None,
             "graph": preferred_graph,
         })
 
+    for alt in profile_alternatives:
+        if len(options) >= limit:
+            break
+        c = alt["candidate"]
+        seen.add(_candidate_key(c))
+        taken.append(candidate_span(c))
+        options.append({
+            "id": f"candidate_{len(options) + 1}",
+            "label": alt["label"],
+            "note": alt["note"],
+            "source": "profile",
+            "recommended": False,
+            "score": c.get("score", 0),
+            "candidate": c,
+            "graph": alt["graph"],
+        })
+
     if generic_candidates is None:
         generic_candidates = build_candidates(ori, stage, max_candidates=12)
 
@@ -940,6 +1177,11 @@ def build_map_options(ori, stage, preferred=None, preferred_graph=None,
             break
         key = _candidate_key(c)
         if key in seen:
+            continue
+        # A generic candidate overlapping a profile map is a misreading of
+        # that same map.
+        start, end = candidate_span(c)
+        if any(start < e and s < end for s, e in taken):
             continue
 
         # Don't fill the selector with calibration look-alikes that barely
@@ -997,13 +1239,45 @@ def build_map_options(ori, stage, preferred=None, preferred_graph=None,
 
     return options[:limit]
 
+def changed_regions(ori, stage, gap=32):
+    """Group changed bytes into [{offset, length}] blocks."""
+    regions = []
+    for d in changed_offsets(ori, stage):
+        if regions and d - regions[-1][1] <= gap:
+            regions[-1][1] = d
+        else:
+            regions.append([d, d])
+    return [{"offset": a, "length": b - a + 1} for a, b in regions]
+
+
 def analyse(ori, stage, ori_name="", stage_name=""):
     profile = identify_profile(ori_name, stage_name)
     base = {"version": ANALYSER_VERSION, "profile": profile}
 
+    if profile["profile"] and not profile["profile"]["torque_model"]:
+        if len(ori) != len(stage):
+            raise ValueError("ORI and Stage 1 BIN sizes must match.")
+        regions = changed_regions(ori, stage)
+        return {
+            **base,
+            "ok": True,
+            "map_type": "no_torque_model",
+            "confidence": "n/a",
+            "message": (
+                f"{profile['label']} ECUs have no torque limiter, so there is "
+                f"no torque curve to graph. The tune changed {len(regions)} "
+                f"areas of the file (fuelling, ignition and load tables)."
+            ),
+            "changed_regions": regions,
+            "candidates": [],
+            "map_options": [],
+        }
+
     # Profile-specific detectors take priority, but the generic detector is
     # still run to provide alternative map candidates for manual comparison.
-    if profile["key"] == "dcm6_2":
+    # The DCM6.2 detector matches an exact breakpoint sequence, so it is safe
+    # to run on generically named files as well.
+    if profile["key"] in ("generic", "dcm6_2"):
         dcm = detect_dcm6_2_torque_map(ori, stage)
         if dcm:
             generic_candidates = build_candidates(ori, stage, max_candidates=12)
@@ -1034,39 +1308,53 @@ def analyse(ori, stage, ori_name="", stage_name=""):
                 ),
             }
 
-    # The Seat EDC17CP14 signature is useful even when the BIN filenames are
-    # generic. It therefore applies for both a recognised EDC17CP14 profile and
-    # an otherwise generic filename pair when the binary signature matches.
-    if profile["key"] in ("generic", "edc17cp14"):
-        seat = detect_edc17cp14_max_torque_map(ori, stage)
-        if seat:
-            generic_candidates = build_candidates(ori, stage, max_candidates=12)
-            options = build_map_options(
-                ori, stage,
-                preferred=seat["candidate"],
-                preferred_graph=seat["graph"],
-                preferred_label="ECU-specific EDC17CP14 max torque limiter",
-                preferred_note="Damos/profile-specific match",
-                generic_candidates=generic_candidates,
-                profile_key=profile["key"],
-            )
-            return {
-                **base,
-                "ok": True,
-                "map_type": "torque_limiter",
-                "confidence": "high",
-                "score": seat["candidate"]["score"],
-                "candidate": seat["candidate"],
-                "graph": seat["graph"],
-                "summary": seat["summary"],
-                "candidates": [o["candidate"] for o in options],
-                "map_options": options,
-                "message": (
-                    "EDC17CP14 maximum torque limiter identified from the "
-                    "calibration signature. Alternative candidates are available "
-                    "for manual comparison."
-                ),
+    # The Bosch pressure x RPM limiter is found from its own inline map
+    # header, so it works whatever the files are called.
+    limiters = detect_bosch_pressure_torque_limiters(ori, stage)
+    if limiters:
+        main, others = limiters[0], limiters[1:]
+        generic_candidates = build_candidates(ori, stage, max_candidates=12)
+        alternatives = [
+            {
+                "candidate": r["candidate"],
+                "graph": r["graph"],
+                "label": "Alternative torque limiter",
+                "note": describe_limiter(r),
             }
+            for r in others
+        ]
+        options = build_map_options(
+            ori, stage,
+            preferred=main["candidate"],
+            preferred_graph=main["graph"],
+            preferred_label=(
+                "Bosch torque limiter (EngPrt_trqLimP_MAP)"
+                if main["candidate"]["layout"] == "bosch_inline_map"
+                else "Bosch torque limit curve"
+            ),
+            preferred_note=describe_limiter(main),
+            generic_candidates=generic_candidates,
+            profile_key=profile["key"],
+            profile_alternatives=alternatives,
+            limit=min(6, max(3, len(limiters))),
+        )
+        return {
+            **base,
+            "ok": True,
+            "map_type": "torque_limiter",
+            "confidence": "high",
+            "score": main["candidate"]["score"],
+            "candidate": main["candidate"],
+            "graph": main["graph"],
+            "summary": main["summary"],
+            "candidates": [o["candidate"] for o in options],
+            "map_options": options,
+            "message": (
+                "Bosch ambient-pressure/engine-speed torque limiter identified "
+                "from its map header. Alternative candidates are available "
+                "for manual comparison."
+            ),
+        }
 
     candidates = build_candidates(ori, stage)
     if not candidates:
@@ -1089,6 +1377,20 @@ def analyse(ori, stage, ori_name="", stage_name=""):
         profile_key=profile_key,
         limit=3,
     )
+    if not options:
+        return {
+            **base,
+            "ok": True,
+            "map_type": "map_candidates",
+            "confidence": "review",
+            "message": (
+                "Changed map-like structures were found, but none produced a "
+                "plausible torque curve to graph."
+            ),
+            "candidates": candidates[:3],
+            "map_options": [],
+        }
+
     top = options[0]["candidate"]
     top_graph = options[0]["graph"]
 

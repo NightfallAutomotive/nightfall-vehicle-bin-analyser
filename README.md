@@ -42,6 +42,14 @@ The analyser can be run using the included application and analysis scripts.
 
 Refer to the source code and test_analyser.py for examples of the currently supported functionality.
 
+Run the tests (requires `pip install pytest`):
+
+    python -m pytest
+
+Print an analysis report for the included test BIN pairs:
+
+    python test_analyser.py
+
 ## Test Files
 
 The `test-files` directory contains anonymous ECU BIN files that can be used when testing and developing the analyser.
