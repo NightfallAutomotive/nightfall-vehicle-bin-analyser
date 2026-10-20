@@ -42,6 +42,11 @@ pairs = [
         test_files / "edc16u1_stage1.bin",
     ),
     (
+        "Opel Vivaro EDC15C3",
+        test_files / "edc15c3_ori.bin",
+        test_files / "edc15c3_stage1.bin",
+    ),
+    (
         "Jaguar EDC17CP55",
         test_files / "edc17cp55_ori.bin",
         test_files / "edc17cp55_stage1.bin",
@@ -112,6 +117,22 @@ def test_edc16_map_is_big_endian_with_rpm_one_per_count():
     assert c["rpm_axis"][-1] == 5300
     peak = max(result["graph"]["points"], key=lambda p: p["ori_torque_nm"])
     assert (peak["rpm"], peak["ori_torque_nm"]) == (2250, 456.0)
+
+
+def test_edc15_shows_full_load_injection_quantity():
+    # EDC15 has no torque model: the Stage 1 is in injection quantity
+    result = result_for("Opel Vivaro EDC15C3")
+    c = result["candidate"]
+    assert result["profile"]["key"] == "edc15"
+    assert result["map_type"] == "quantity_limiter"
+    assert (c["layout"], c["table_offset"], c["columns"]) == ("edc15_curve", 0x7430E, 19)
+    assert result["graph"]["unit"] == "mm³"
+    assert result["summary"]["peak_ori"] == pytest.approx(55.7)
+    assert result["summary"]["peak_stage1"] == pytest.approx(65.0)
+    # The other quantity limits were set flat, out of the way
+    taken_out = [o for o in result["map_options"]
+                 if "limit_removed_in_stage1" in o["candidate"]["warnings"]]
+    assert len(taken_out) == 5
 
 
 def test_jaguar_flags_per_gear_copies_and_removed_limits():
@@ -189,6 +210,7 @@ def test_size_mismatch_is_rejected():
     ("seat_edc17c64_bench_int_flash.bin", "edc17c64"),
     ("fomoco_bosch_edc17cp55_flexray_obd_maps.bin", "edc17cp55"),
     ("edc16u1_20261005210329_Ori_ext_flash.bin", "edc16"),
+    ("renault_bosch_edc15c3_obd_maps_20261019095251.bin", "edc15"),
     ("Seat_Ibiza_1.4i_16v_Marelli_IAW_4HV_OBD_ORI.bin", "marelli_iaw"),
 ])
 def test_profile_matches_whole_words(filename, key):

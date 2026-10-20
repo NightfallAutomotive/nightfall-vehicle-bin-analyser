@@ -1064,6 +1064,63 @@ def detect_bosch_pressure_torque_limiters(ori, stage):
     return sorted(results.values(), key=_limiter_rank)
 
 
+def find_bosch_limiters(data):
+    """Find Bosch inline torque limiters in a single file (no original to
+    compare against). Returns parsed maps/curves with their stock-or-tuned
+    values as found, merging identical copies."""
+    found = {}
+    for layout in BOSCH_LAYOUTS:
+        count = len(data) // 2
+        words = struct.unpack(f"{layout['endian']}{count}h", data[:2 * count])
+        last_end = -1
+        for i, w in enumerate(words):
+            off = 2 * i
+            if off < last_end:
+                continue
+            item = None
+            if 2 <= w <= _BOSCH_MAX_X and i + 1 < count and 8 <= words[i + 1] <= _BOSCH_MAX_Y:
+                item = read_pressure_torque_map(data, off, layout)
+            if item is None and 8 <= w <= _BOSCH_MAX_Y:
+                item = read_torque_curve(data, off, layout)
+            if item is None:
+                continue
+            last_end = item["end"]
+            key = (item["kind"], tuple(item["rpm"]), tuple(map(tuple, item["rows"])))
+            if key in found:
+                found[key]["copies"] += 1
+                continue
+            row = item["rows"][-1]
+            points = [(rpm, v * BOSCH_NM_PER_COUNT) for rpm, v in zip(item["rpm"], row)
+                      if GRAPH_RPM_MIN <= rpm <= GRAPH_RPM_MAX]
+            if len(points) < 6:
+                continue
+            peak_rpm, peak_nm = max(points, key=lambda p: p[1])
+            nms = [nm for _, nm in points]
+            removed = item["kind"] == "map" and all(abs(nm - 1000) < 0.5 for nm in nms)
+            # Without a second file, only keep what is shaped like an engine
+            # torque limit: rises from idle to a 100-900 Nm peak at
+            # 1500-4500 RPM, then falls away towards the top.
+            torque_shaped = (
+                100 <= peak_nm <= 900 and 1500 <= peak_rpm <= 4500
+                and nms[0] < peak_nm * 0.9 and nms[-1] <= peak_nm * 0.8
+            )
+            if not (removed or torque_shaped):
+                continue
+            found[key] = {
+                "offset": item["values_offset"],
+                "kind": item["kind"],
+                "ecu_family": layout["family"],
+                "pressure_hpa": item["pressure"][-1] if item["pressure"] else None,
+                "peak_nm": round(peak_nm, 1),
+                "peak_rpm": int(peak_rpm),
+                # A flat 1000 Nm line is how tunes switch a limiter off
+                "removed": removed,
+                "copies": 1,
+            }
+    # Pressure maps first (the main engine-protection limiter), then curves
+    return sorted(found.values(), key=lambda r: (r["kind"] != "map", r["removed"], -r["peak_nm"]))
+
+
 def describe_limiter(r):
     c = r["candidate"]
     if c["layout"] == "bosch_inline_map":
@@ -1076,6 +1133,121 @@ def describe_limiter(r):
     if r["removed"]:
         text += "; limit removed in Stage 1"
     return text
+
+
+# Bosch EDC15 has no torque model: it limits engine output by injection
+# quantity. Per the BMW EDC15C A2L, curves are stored little-endian as
+#   [source address, n, rpm axis (raw = rpm), values (raw = 0.01 mm3/stroke)]
+# The full-load quantity curve over RPM (mrwBDBN_KL, "Drehmomentbegrenzung")
+# plays the part of the torque limiter.
+EDC15_MAX_FILE = 1024 * 1024
+EDC15_MM3_PER_COUNT = 0.01
+
+
+def read_edc15_curve(data, off):
+    """Parse an EDC15 RPM curve at off, or return None."""
+    if off + 4 > len(data):
+        return None
+    n = struct.unpack_from("<H", data, off + 2)[0]
+    if not 6 <= n <= 32 or off + 4 + 4 * n > len(data):
+        return None
+    words = struct.unpack_from(f"<{2 * n}h", data, off + 4)
+    rpm, values = list(words[:n]), list(words[n:])
+    if not (0 <= rpm[0] <= 1500 and 3000 <= rpm[-1] <= 6000 and _increasing(rpm)):
+        return None
+    if min(values) < 0 or max(values) > 15000:
+        return None
+    return {"offset": off, "values_offset": off + 4 + 2 * n, "end": off + 4 + 4 * n,
+            "rpm": rpm, "values": values}
+
+
+def _edc15_result(o, s):
+    points = []
+    for rpm, ov, sv in zip(o["rpm"], o["values"], s["values"]):
+        if not GRAPH_RPM_MIN <= rpm <= GRAPH_RPM_MAX:
+            continue
+        on, sn = ov * EDC15_MM3_PER_COUNT, sv * EDC15_MM3_PER_COUNT
+        points.append({"x": rpm, "rpm": rpm, "ori_torque_nm": round(on, 2),
+                       "stage_torque_nm": round(sn, 2), "gain_nm": round(sn - on, 2)})
+    # Past the governor cut-off both files are zero; keep only the first
+    while len(points) >= 2 and not any(
+            p["ori_torque_nm"] or p["stage_torque_nm"] for p in points[-2:]):
+        points.pop()
+    if len(points) < 6:
+        return None
+
+    ori_vals = [p["ori_torque_nm"] for p in points]
+    stage_vals = [p["stage_torque_nm"] for p in points]
+    peak_ori, peak_stage = max(ori_vals), max(stage_vals)
+    peak_rpm = points[ori_vals.index(peak_ori)]["rpm"]
+    # Full-load limit shape: a 20-100 mm3 peak at 1500-3500 RPM that falls
+    # away by the top end
+    shaped = (20 <= peak_ori <= 100 and 1500 <= peak_rpm <= 3500
+              and ori_vals[-1] <= peak_ori * 0.85)
+    removed = len(set(stage_vals)) == 1 and peak_stage > peak_ori
+    if not (shaped or removed):
+        return None
+
+    changed = sum(a != b for a, b in zip(o["values"], s["values"]))
+    candidate = {
+        "offset": o["values_offset"], "rows": 1, "columns": len(o["rpm"]),
+        "axis_offset": o["offset"] + 4, "table_offset": o["values_offset"],
+        "row_axis_offset": None, "row_axis": [], "rpm_axis": o["rpm"],
+        "score": 97.0 if shaped and not removed else 60.0,
+        "axis_confidence": 98.0, "map_confidence": 95.0,
+        "difference_percent": round(100.0 * changed / len(o["values"]), 1),
+        "modified_cells": changed, "total_cells": len(o["values"]),
+        "scale": EDC15_MM3_PER_COUNT, "scale_confidence": 95.0, "scale_source": "damos",
+        "endian": "little", "ecu_family": "EDC15", "layout": "edc15_curve",
+        "orientation": "columns", "secondary_axis": [], "secondary_axis_offset": None,
+        "warnings": ["limit_removed_in_stage1"] if removed else [],
+        "curve_quality": 95.0, "stage_saturation": 0.0,
+        "copies": 1, "copy_offsets": [o["values_offset"]],
+    }
+    graph = {
+        "row_index": 0, "row_axis_value": None, "points": points,
+        "curves": [{"label": "RPM curve", "points": points}],
+        "range": {"start_rpm": points[0]["rpm"], "end_rpm": points[-1]["rpm"],
+                  "point_count": len(points), "stop_reason": "graph_rpm_window"},
+        "scale": EDC15_MM3_PER_COUNT, "scale_confidence": 95.0,
+        "x_label": "RPM", "x_key": "rpm",
+        # Not torque: EDC15 limits fuel per injection
+        "y_label": "Injection quantity", "unit": "mm³",
+    }
+    summary = {"peak_ori": peak_ori, "peak_stage1": peak_stage,
+               "peak_gain": max(p["gain_nm"] for p in points),
+               "rows": 1, "columns": len(o["rpm"]), "unit": "mm³"}
+    return {"candidate": candidate, "graph": graph, "summary": summary,
+            "removed": removed, "shaped": shaped}
+
+
+def detect_edc15_quantity_limiters(ori, stage):
+    """Find changed EDC15 full-load quantity curves, main limiter first."""
+    if len(ori) != len(stage) or len(ori) > EDC15_MAX_FILE:
+        return []
+    diffs = changed_offsets(ori, stage)
+    regions = changed_regions(ori, stage)
+    results, seen = [], set()
+    for region in regions:
+        start = max(0, (region["offset"] & ~1) - 4 - 4 * 32)
+        for off in range(start, region["offset"] + region["length"], 2):
+            if off in seen:
+                continue
+            o = read_edc15_curve(ori, off)
+            if not o or not has_change(diffs, o["values_offset"], o["end"]):
+                continue
+            s = read_edc15_curve(stage, off)
+            if not s or s["rpm"] != o["rpm"]:
+                continue
+            seen.add(off)
+            result = _edc15_result(o, s)
+            if result:
+                results.append(result)
+    # Raised, shaped limiters first; flat "taken out" ones after
+    results.sort(key=lambda r: (r["removed"], not r["shaped"],
+                                r["summary"]["peak_stage1"] <= r["summary"]["peak_ori"],
+                                -r["summary"]["peak_ori"]))
+    return results
 
 
 def candidate_span(c):
@@ -1364,6 +1536,43 @@ def analyse(ori, stage, ori_name="", stage_name=""):
                 "Bosch ambient-pressure/engine-speed torque limiter identified "
                 "from its map header. Alternative candidates are available "
                 "for manual comparison."
+            ),
+        }
+
+    # EDC15: no torque model, so graph the full-load injection quantity
+    quantity = detect_edc15_quantity_limiters(ori, stage)
+    if quantity and quantity[0]["shaped"]:
+        main = quantity[0]
+        options = []
+        for i, r in enumerate(quantity[:6]):
+            taken_out = "; limit taken out in Stage 1 (set flat)" if r["removed"] else ""
+            options.append({
+                "id": f"candidate_{i + 1}",
+                "label": "EDC15 full-load quantity limit" if i == 0 else "Alternative quantity limit",
+                "note": (f"{r['candidate']['columns']}-point RPM curve at "
+                         f"0x{r['candidate']['table_offset']:X}, injection quantity in mm³/stroke"
+                         f"{taken_out}"),
+                "source": "profile",
+                "recommended": i == 0,
+                "score": r["candidate"]["score"],
+                "candidate": r["candidate"],
+                "graph": r["graph"],
+            })
+        return {
+            **base,
+            "ok": True,
+            "map_type": "quantity_limiter",
+            "confidence": "high",
+            "score": main["candidate"]["score"],
+            "candidate": main["candidate"],
+            "graph": main["graph"],
+            "summary": main["summary"],
+            "candidates": [o["candidate"] for o in options],
+            "map_options": options,
+            "message": (
+                "EDC15 has no torque model; it limits engine output by "
+                "injection quantity, so the full-load quantity limit is shown "
+                "in mm³ per stroke."
             ),
         }
 

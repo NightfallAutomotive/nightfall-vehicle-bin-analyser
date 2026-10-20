@@ -94,6 +94,28 @@ PROFILES = (
         notes="The Damos contains many torque-management functions. Prefer the documented maximum-torque limitation definition over generic torque maps.",
     ),
     ECUProfile(
+        key="edc15",
+        label="Bosch EDC15",
+        family="Bosch EDC15",
+        match_terms=("edc15", "edc15c2", "edc15c3", "edc15c4", "edc15p", "edc15v", "edc15vm"),
+        primary=(CalibrationDefinition(
+            name="mrwBDBN_KL",
+            purpose="Full-load injection quantity limit over engine speed",
+            units="mm3/stroke (raw / 100)",
+            axis_notes="Curve [source address, n, rpm axis, values], little-endian; engine speed raw = rpm.",
+            role="primary_quantity_limit",
+        ),),
+        secondary=(CalibrationDefinition(
+            name="mrwBRA_KF",
+            purpose="Smoke limiter: injection quantity over engine speed and air mass",
+            units="mm3/stroke (raw / 100)",
+            axis_notes="Map with the same axis headers.",
+            role="secondary_quantity_limit",
+        ),),
+        exclusions=(),
+        notes="EDC15 has no torque model; output is limited by injection quantity. Layout and scaling from the BMW EDC15C A2L.",
+    ),
+    ECUProfile(
         key="edc16",
         label="Bosch EDC16 (VAG)",
         family="Bosch EDC16",

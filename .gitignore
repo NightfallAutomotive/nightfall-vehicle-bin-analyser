@@ -5,3 +5,6 @@ __pycache__/
 *.env
 .vscode/
 .idea/
+
+# Stock originals for single-file analysis (kept off the public repo)
+library/

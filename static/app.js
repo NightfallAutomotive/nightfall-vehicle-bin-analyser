@@ -24,17 +24,15 @@ button.addEventListener("click", async () => {
     errorBox.style.display = "none";
 
     if (!oriInput.files[0]) {
-        showError("Please select the original BIN.");
+        showError("Please select a BIN file.");
         return;
     }
 
-    if (!stageInput.files[0]) {
-        showError("Please select the Stage 1 BIN.");
-        return;
-    }
+    // One file on its own is checked against the library of stock originals
+    const single = !stageInput.files[0];
 
     button.disabled = true;
-    statusText.textContent = "Analysing BINs...";
+    statusText.textContent = single ? "Analysing file..." : "Analysing BINs...";
 
     try {
 
@@ -45,10 +43,16 @@ button.addEventListener("click", async () => {
             oriInput.files[0]
         );
 
-        formData.append(
-            "stage1",
-            stageInput.files[0]
-        );
+        if (!single) {
+            formData.append(
+                "stage1",
+                stageInput.files[0]
+            );
+            formData.append(
+                "save_original",
+                document.getElementById("save-original").checked ? "true" : "false"
+            );
+        }
 
         const response = await fetch(
             "/analyse",
@@ -111,6 +115,8 @@ function showError(message) {
 function renderResults(result) {
 
     window.binAnalyserResult = result;
+    document.getElementById("results").style.display = "block";
+    renderChanges(result);
 
     const options =
         result.map_options || [];
@@ -148,6 +154,11 @@ function renderResults(result) {
             mapSelector.appendChild(item);
         }
     );
+
+    // Without a torque graph there is nothing for the chart to show
+    const hasGraph = options.some(option => option.graph?.points?.length);
+    document.getElementById("torque-panel").hidden = !hasGraph;
+    document.getElementById("torque-summary").hidden = !hasGraph;
 
     if (!options.length) {
         mapSelector.innerHTML =
@@ -200,8 +211,19 @@ function renderSelectedMap(result, index) {
 
     document.getElementById("results").style.display = "block";
 
+    // EDC15 limits injection quantity (mm³) rather than torque (Nm)
+    const unit = graph.unit || "Nm";
+    const quantity = graph.y_label || "Torque";
+    const limiterName = unit === "Nm" ? "Torque limiter" : "Quantity limiter";
+    window.binAnalyserUnit = unit;
+    window.binAnalyserQuantity = quantity;
+
     document.getElementById("map-type").textContent =
-        option.recommended ? "Torque limiter" : "Torque limiter candidate";
+        option.recommended ? limiterName : `${limiterName} candidate`;
+    document.getElementById("peak-label").textContent = `Peak Stage 1 ${quantity}`;
+    document.getElementById("chart-title").textContent = `${limiterName} comparison`;
+    document.getElementById("ori-heading").textContent = `ORI ${unit}`;
+    document.getElementById("stage-heading").textContent = `Stage 1 ${unit}`;
 
     document.getElementById("confidence").textContent =
         option.recommended
@@ -227,7 +249,7 @@ function renderSelectedMap(result, index) {
             ...points.map(point => point.stage_torque_nm)
         );
         document.getElementById("peak-torque").textContent =
-            `${peakStage.toFixed(1)} Nm`;
+            `${peakStage.toFixed(1)} ${unit}`;
     }
 
     window.binAnalyserXAxisLabel = axisLabel;
@@ -241,7 +263,7 @@ function renderSelectedMap(result, index) {
 
     const scaleText =
         Number.isFinite(Number(candidate.scale))
-            ? ` Scale ${Number(candidate.scale)} Nm/count.`
+            ? ` Scale ${Number(candidate.scale)} ${unit}/count.`
             : "";
 
     mapSelectorNote.textContent =
@@ -251,6 +273,132 @@ function renderSelectedMap(result, index) {
 
     drawChart(points);
     renderTable(points);
+}
+
+
+const COMPARISON_TEXT = {
+    original: () => "Compared with the original you uploaded.",
+    library: comparison =>
+        `Compared with the stock original for software ${comparison.software}, ` +
+        "found in the library.",
+};
+
+
+function listItem(text, kind) {
+    const item = document.createElement("li");
+    item.textContent = text;
+    if (kind) item.className = `is-${kind}`;
+    return item;
+}
+
+
+function renderChanges(result) {
+
+    const comparison = result.comparison || {};
+    const changes = result.changes;
+    const list = document.getElementById("changes-summary");
+    const codesBox = document.getElementById("fault-codes");
+    const chips = document.getElementById("fault-code-chips");
+    const codeNote = document.getElementById("fault-code-note");
+    const switchBox = document.getElementById("switch-details");
+    const switchList = document.getElementById("switch-list");
+
+    list.innerHTML = "";
+    chips.innerHTML = "";
+    switchList.innerHTML = "";
+    codesBox.hidden = true;
+    switchBox.hidden = true;
+
+    document.getElementById("comparison-note").textContent =
+        COMPARISON_TEXT[comparison.mode]?.(comparison) || result.message || "";
+
+    // Torque first: it is what most tunes are about
+    const summary = result.summary || {};
+    const limiterTypes = ["torque_limiter", "quantity_limiter"];
+    if (limiterTypes.includes(result.map_type) && summary.peak_ori && summary.peak_stage1) {
+        const unit = summary.unit || "Nm";
+        const what = unit === "Nm" ? "Torque limiter" : "Full-load injection quantity";
+        list.appendChild(listItem(
+            `${what} changed: ${summary.peak_ori} ${unit} → ${summary.peak_stage1} ${unit} peak`,
+            summary.peak_stage1 > summary.peak_ori ? "torque" : "muted"
+        ));
+    }
+
+    if (changes) {
+        changes.summary.forEach(line => {
+            const kind =
+                line.startsWith("Speed") ? "speed"
+                : line.includes("fault") || line.includes("Fault") ? "fault"
+                : line.includes("switch") ? "switch"
+                : "";
+            list.appendChild(listItem(line, kind));
+        });
+
+        if (!changes.summary.length && !limiterTypes.includes(result.map_type)) {
+            list.appendChild(listItem(
+                result.map_type === "unchanged"
+                    ? "Nothing has been changed."
+                    : "No torque, speed limiter, switch or fault code changes recognised.",
+                "muted"
+            ));
+        }
+        if (changes.changed_bytes) {
+            list.appendChild(listItem(
+                `${changes.changed_bytes.toLocaleString()} bytes changed in ` +
+                `${changes.changed_regions} areas of the file in total.`,
+                "muted"
+            ));
+        }
+
+        const faults = changes.faults || {};
+        if (faults.codes?.length) {
+            faults.codes.forEach(({ code, checks }) => {
+                const chip = document.createElement("span");
+                chip.className = "chip";
+                chip.textContent = code;
+                if (checks > 1) {
+                    const count = document.createElement("small");
+                    count.textContent = `×${checks}`;
+                    chip.appendChild(count);
+                }
+                chips.appendChild(chip);
+            });
+            codeNote.textContent =
+                "BMW fault codes as stored in the ECU; ×N means N fault checks report that code.";
+            codesBox.hidden = false;
+        } else if (faults.disabled_masks || faults.cleared_classes) {
+            codeNote.textContent =
+                "The fault codes themselves can't be named for this ECU yet, only counted.";
+            codesBox.hidden = false;
+        }
+
+        if (changes.switches?.length) {
+            changes.switches.forEach(s => {
+                const item = document.createElement("li");
+                item.textContent =
+                    `0x${s.offset.toString(16).toUpperCase()}: ${s.old} → ${s.new}`;
+                switchList.appendChild(item);
+            });
+            switchBox.hidden = false;
+        }
+    }
+
+    // Tell people what happened to the original they uploaded
+    const saved = result.library;
+    if (saved?.saved) {
+        list.appendChild(listItem(
+            `Your original was added to the library (software ${saved.software}), ` +
+            "so modified files for this software can now be checked on their own.",
+            "muted"
+        ));
+    } else if (saved?.reason && saved.reason !== "not saved, as requested") {
+        list.appendChild(listItem(`Your original was not added to the library: ${saved.reason}.`, "muted"));
+    }
+
+    // One file with no original found: only what can be seen in the file itself
+    (result.patterns?.findings || []).forEach(line => {
+        list.appendChild(listItem(line, line.includes("switched off") ? "fault" : "torque"));
+    });
 }
 
 
@@ -355,10 +503,12 @@ function drawChart(points) {
             )
         );
 
+    // Grid every 50 Nm, or every 10 for small values such as mm³
+    const step = maxTorque > 150 ? 50 : 10;
     const yMax =
         Math.ceil(
-            maxTorque / 50
-        ) * 50;
+            maxTorque / step
+        ) * step;
 
     const x =
         rpm =>
@@ -382,7 +532,7 @@ function drawChart(points) {
     for (
         let value = 0;
         value <= yMax;
-        value += 50
+        value += step
     ) {
 
         const yy = y(value);
@@ -446,7 +596,7 @@ function drawChart(points) {
             text-anchor="middle"
             transform="rotate(-90 18 ${height / 2})"
         >
-            Torque (Nm)
+            ${window.binAnalyserQuantity || "Torque"} (${window.binAnalyserUnit || "Nm"})
         </text>
         `
     );
@@ -593,7 +743,7 @@ function renderTable(points) {
             </td>
 
             <td class="${change > 0 ? "gain-up" : change < 0 ? "gain-down" : ""}">
-                ${change >= 0 ? "+" : ""}${change.toFixed(1)} Nm
+                ${change >= 0 ? "+" : ""}${change.toFixed(1)} ${window.binAnalyserUnit || "Nm"}
             </td>
         `;
 

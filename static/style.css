@@ -29,6 +29,11 @@
   box-sizing: border-box;
 }
 
+/* Layout rules like display: grid must never un-hide an element */
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-height: 100%;
   background: var(--bg-deep);
@@ -282,6 +287,12 @@ h1 .accent {
   letter-spacing: 0.2em;
 }
 
+.upload-label em {
+  color: var(--dim);
+  font-style: normal;
+  font-weight: 600;
+}
+
 .upload-label .dot {
   width: 8px;
   height: 8px;
@@ -332,6 +343,34 @@ input[type="file"]:focus-visible {
 
 .upload-box.has-file .file-name {
   color: var(--green);
+}
+
+.save-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(136, 192, 208, 0.25);
+  border-radius: 8px;
+  background: rgba(136, 192, 208, 0.06);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.save-notice strong {
+  color: var(--text);
+}
+
+.save-notice input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--cyan);
+  cursor: pointer;
 }
 
 .actions {
@@ -667,6 +706,95 @@ td.gain-up {
 td.gain-down {
   color: var(--red);
   font-weight: 700;
+}
+
+/* ---------- What's been done ---------- */
+
+.changes-panel {
+  margin-bottom: 20px;
+}
+
+.changes-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changes-list li {
+  position: relative;
+  padding: 12px 14px 12px 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 14px;
+}
+
+.changes-list li::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 15px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent, var(--cyan));
+  box-shadow: 0 0 10px var(--accent, var(--cyan));
+  transform: translateY(-50%);
+}
+
+.changes-list li.is-fault { --accent: var(--red); }
+.changes-list li.is-speed { --accent: var(--purple); }
+.changes-list li.is-torque { --accent: var(--green); }
+.changes-list li.is-switch { --accent: var(--blue); }
+.changes-list li.is-muted { --accent: var(--dim); color: var(--muted); }
+
+.sub-title {
+  margin: 24px 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  padding: 5px 10px;
+  border: 1px solid rgba(191, 97, 106, 0.45);
+  border-radius: 6px;
+  background: rgba(191, 97, 106, 0.1);
+  color: var(--text);
+  font: 600 13px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.chip small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.switch-details {
+  margin-top: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.switch-details summary {
+  color: var(--text);
+  cursor: pointer;
+}
+
+.switch-list {
+  columns: 3 180px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font: 12px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 /* ---------- Footer ---------- */

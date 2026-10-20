@@ -50,6 +50,36 @@ Print an analysis report for the included test BIN pairs:
 
     python test_analyser.py
 
+## Checking a Single File
+
+Upload one file on its own to find out what has been done to it: torque
+limiter changes, a raised speed limiter, on/off switches, and fault checks
+switched off (with the fault codes, where the ECU layout allows it).
+
+The analyser reads the file's Bosch software number and compares it with the
+stock original for that number from a library on the server. Without a
+match it falls back to pattern checks, which can only report the torque
+limiter maps in the file.
+
+The library is a folder of stock reads, set with `NIGHTFALL_ORI_LIBRARY`
+(default `./library`, which git ignores). Fill it from a WinOLS job
+database; files are named by software number and hash, so no registrations,
+VINs or customer names are copied:
+
+    python build_library.py "/path/to/WinOLS Database" --dry-run
+    python build_library.py "/path/to/WinOLS Database"
+
+Only add reads you know are stock: a car that was tuned before it was read
+gives a misleading original.
+
+When someone uploads an original together with a modified file, the original
+is also saved, in `library/uploads`, so that software can be checked on its
+own next time. The page tells people this and lets them opt out. Only the
+contents are kept, named by software number and hash, never the uploaded
+filename. Curated originals are preferred over uploaded ones, since an
+uploaded "original" may already have been tuned. On a hosted server, keep the
+library on persistent storage so it survives restarts and redeploys.
+
 ## Test Files
 
 The `test-files` directory contains anonymous ECU BIN files that can be used when testing and developing the analyser.

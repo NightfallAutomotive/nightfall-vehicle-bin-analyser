@@ -32,23 +32,31 @@
 			<div class="panel-header">
 				<p class="eyebrow">ECU CALIBRATION</p>
 				<h1 id="page-title">BIN <span class="accent">analyser.</span></h1>
-				<p class="intro">Compare an original calibration with a Stage 1 file to find the torque limiter and see what the tune changed. Files are analysed on this server and not stored.</p>
+				<p class="intro">Upload an original and a modified file to see exactly what the tune changed, or just one file to find out what has been done to it: torque, speed limiter, switches and the fault codes that were turned off. Modified files are never stored; see below for originals.</p>
 			</div>
 
 			<div class="panel-body">
 				<div class="upload-grid">
 					<label class="upload-box" id="ori-box" for="ori">
-						<span class="upload-label"><span class="dot ori"></span>ORIGINAL BIN</span>
+						<span class="upload-label"><span class="dot ori"></span>ORIGINAL BIN <em>OR THE ONLY FILE</em></span>
 						<input id="ori" type="file" accept=".bin,.BIN,.ori,.mod,.file">
 						<div id="ori-name" class="file-name">No file selected</div>
 					</label>
 
 					<label class="upload-box" id="stage-box" for="stage1">
-						<span class="upload-label"><span class="dot stage"></span>STAGE 1 BIN</span>
+						<span class="upload-label"><span class="dot stage"></span>MODIFIED BIN <em>OPTIONAL</em></span>
 						<input id="stage1" type="file" accept=".bin,.BIN,.ori,.mod,.file">
 						<div id="stage-name" class="file-name">No file selected</div>
 					</label>
 				</div>
+
+				<label class="save-notice" for="save-original">
+					<input id="save-original" type="checkbox" checked>
+					<span>
+						<strong>Add my original to the library.</strong>
+						When you upload an original and a modified file, the original is kept on this server so modified files with the same software can later be checked on their own. Only the file contents are stored, named by software number; your filename is not kept. Untick to keep it private.
+					</span>
+				</label>
 
 				<div class="actions">
 					<button id="analyse-button" class="primary-button" type="button">Analyse BINs</button>
@@ -60,7 +68,24 @@
 		</section>
 
 		<div id="results">
-			<div class="summary">
+			<section class="panel changes-panel" aria-labelledby="changes-title">
+				<div class="panel-body">
+					<h2 class="chart-title" id="changes-title">What's been done</h2>
+					<p id="comparison-note" class="chart-note"></p>
+					<ul id="changes-summary" class="changes-list"></ul>
+					<div id="fault-codes" class="fault-codes" hidden>
+						<h3 class="sub-title">FAULT CODES SWITCHED OFF</h3>
+						<div id="fault-code-chips" class="chips"></div>
+						<p id="fault-code-note" class="selector-note"></p>
+					</div>
+					<details id="switch-details" class="switch-details" hidden>
+						<summary>On/off switches flipped</summary>
+						<ul id="switch-list" class="switch-list"></ul>
+					</details>
+				</div>
+			</section>
+
+			<div class="summary" id="torque-summary">
 				<div class="stat">
 					<div class="stat-label">Map</div>
 					<div id="map-type" class="stat-value">—</div>
@@ -74,16 +99,16 @@
 					<div id="rpm-range" class="stat-value">—</div>
 				</div>
 				<div class="stat">
-					<div class="stat-label">Peak Stage 1 Torque</div>
+					<div class="stat-label" id="peak-label">Peak Stage 1 Torque</div>
 					<div id="peak-torque" class="stat-value">—</div>
 				</div>
 			</div>
 
-			<section class="panel">
+			<section class="panel" id="torque-panel">
 				<div class="panel-body">
 					<div class="chart-header">
 						<div>
-							<h2 class="chart-title">Torque limiter comparison</h2>
+							<h2 class="chart-title" id="chart-title">Torque limiter comparison</h2>
 							<p class="chart-note">Original calibration vs Stage 1.</p>
 						</div>
 						<div class="legend">
@@ -109,8 +134,8 @@
 							<thead>
 								<tr>
 									<th id="x-axis-table-heading">RPM</th>
-									<th>ORI Nm</th>
-									<th>Stage 1 Nm</th>
+									<th id="ori-heading">ORI Nm</th>
+									<th id="stage-heading">Stage 1 Nm</th>
 									<th>Change</th>
 								</tr>
 							</thead>
