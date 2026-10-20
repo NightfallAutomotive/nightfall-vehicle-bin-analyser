@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="/static/style.css" />
 <script src="/static/decrypted-text.js"></script>
 <script src="/static/matrix-rain.js"></script>
+<script src="/static/star-border.js"></script>
 </head>
 <body>
 <canvas id="matrix-rain" class="matrix-rain" aria-hidden="true"></canvas>
@@ -146,6 +147,15 @@
 			</section>
 		</div>
 	</main>
+
+	<aside class="beta-box" aria-labelledby="beta-title">
+		<div class="beta-copy">
+			<span class="beta-tag">BETA</span>
+			<h2 id="beta-title">This analyser is in beta.</h2>
+			<p>Results come from recognising maps in the file and can be wrong, especially on ECUs it hasn't seen before. Always check a map in WinOLS before you write a file to a car.</p>
+		</div>
+		<a id="report-button" class="beta-button" href="https://github.com/NightfallAutomotive/nightfall-vehicle-bin-analyser/issues/new" target="_blank" rel="noopener"><span>Report a problem</span></a>
+	</aside>
 
 	<footer class="page-footer">
 		<span>© <a href="https://nightfallautomotive.co.uk">NIGHTFALL AUTOMOTIVE</a></span>

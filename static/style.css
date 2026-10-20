@@ -580,7 +580,8 @@ input[type="file"]:focus-visible {
   background: var(--bg);
 }
 
-svg {
+/* The torque chart only; other SVGs (like the star border) size themselves */
+#chart {
   display: block;
   width: 100%;
   min-width: 720px;
@@ -797,6 +798,124 @@ td.gain-down {
   font: 12px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
+/* ---------- Beta box ---------- */
+
+.beta-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 24px;
+  margin-top: 28px;
+  padding: 24px 28px;
+  border: 1px dashed rgba(180, 142, 173, 0.55);
+  border-radius: var(--radius);
+  background: rgba(46, 52, 64, 0.88);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.beta-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--purple);
+  color: var(--bg-deep);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.25em;
+}
+
+.beta-box h2 {
+  margin: 12px 0 6px;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.beta-box p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Plain button; star-border.js adds the travelling star */
+.beta-button {
+  justify-self: end;
+  display: inline-grid;
+  place-items: center;
+  min-width: 200px;
+  padding: 14px 26px;
+  border-radius: 12px;
+  background: rgba(32, 36, 45, 0.85);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.beta-button:hover {
+  background: rgba(236, 239, 244, 0.06);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.beta-button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 5px;
+}
+
+/* ---------- Star border ---------- */
+
+.star-border {
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--sb-radius);
+}
+
+/* A faint resting outline for the star to travel along */
+.star-border--dark {
+  box-shadow: inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14);
+}
+
+.star-border > :not(.sb-layer) {
+  position: relative;
+  z-index: 1;
+}
+
+.sb-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 0 var(--sb-glow) var(--sb-color));
+}
+
+.sb-star {
+  filter: drop-shadow(0 0 3px var(--sb-color));
+}
+
+/* clickPulse: a ring that spreads out from the border */
+.star-border.is-pulsing {
+  animation: sb-pulse 600ms ease-out;
+}
+
+@keyframes sb-pulse {
+  from {
+    box-shadow:
+      inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14),
+      0 0 0 0 color-mix(in srgb, var(--sb-color) 45%, transparent);
+  }
+  to {
+    box-shadow:
+      inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14),
+      0 0 0 14px color-mix(in srgb, var(--sb-color) 0%, transparent);
+  }
+}
+
 /* ---------- Footer ---------- */
 
 .page-footer {
@@ -843,8 +962,13 @@ td.gain-down {
   }
 
   .upload-grid,
-  .summary {
+  .summary,
+  .beta-box {
     grid-template-columns: 1fr;
+  }
+
+  .beta-box {
+    padding: 20px;
   }
 
   .page-footer {
