@@ -1,0 +1,24 @@
+# Render Blueprint: deploys the analyser as a Python web service.
+# In Render: New > Blueprint, then pick this repository.
+services:
+  - type: web
+    name: nightfall-bin-analyser
+    runtime: python
+    # A persistent disk (below) needs a paid plan. For the free plan, delete
+    # the disk block and set plan: free; saved originals are then lost on
+    # every redeploy or restart.
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      # Stock originals for single-file checks, on the persistent disk
+      - key: NIGHTFALL_ORI_LIBRARY
+        value: /var/data/library
+    disk:
+      name: ori-library
+      mountPath: /var/data
+      sizeGB: 5

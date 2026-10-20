@@ -80,6 +80,29 @@ filename. Curated originals are preferred over uploaded ones, since an
 uploaded "original" may already have been tuned. On a hosted server, keep the
 library on persistent storage so it survives restarts and redeploys.
 
+## Deploying
+
+The analyser is a Python (FastAPI) server, so it needs a host that runs
+Python; static hosts such as Netlify or GitHub Pages can't run it.
+
+`render.yaml` sets it up on [Render](https://render.com): in the Render
+dashboard choose **New > Blueprint** and pick this repository. It builds with
+`pip install -r requirements.txt`, starts with
+`uvicorn app:app --host 0.0.0.0 --port $PORT`, and redeploys on every push.
+
+The stock-original library lives on a persistent disk mounted at
+`/var/data` (`NIGHTFALL_ORI_LIBRARY=/var/data/library`), which needs a paid
+plan. On the free plan, remove the `disk` block and set `plan: free`; the
+analyser works the same, but saved originals are lost whenever it restarts.
+
+To add your curated originals, build the library locally with
+`build_library.py` and copy the folder to `/var/data/library` on the server
+(Render's SSH access supports `scp`).
+
+Any other Python host works the same way: install the requirements, set
+`NIGHTFALL_ORI_LIBRARY` to a folder on persistent storage, and run the
+uvicorn command above.
+
 ## Test Files
 
 The `test-files` directory contains anonymous ECU BIN files that can be used when testing and developing the analyser.
