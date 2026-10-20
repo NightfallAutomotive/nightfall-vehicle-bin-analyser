@@ -325,6 +325,9 @@ class OriLibrary:
 
     MIN_SIZE = 256 * 1024
     MAX_SIZE = 16 * 1024 * 1024
+    # Total room for saved uploads, so a public server's disk can't be
+    # filled (NIGHTFALL_UPLOADS_MAX_GB, default 2)
+    UPLOADS_MAX_BYTES = int(float(os.environ.get("NIGHTFALL_UPLOADS_MAX_GB", "2")) * 1024 ** 3)
 
     def __init__(self, folder=None):
         self.folder = Path(folder or os.environ.get("NIGHTFALL_ORI_LIBRARY") or DEFAULT_LIBRARY)
@@ -382,6 +385,9 @@ class OriLibrary:
                 self._build()
             if any(p.name == name for paths in self._index.values() for p in paths):
                 return {"saved": False, "reason": "already in the library", "software": ids[0]}
+            used = sum(p.stat().st_size for p in self.uploads.glob("*.bin")) if self.uploads.is_dir() else 0
+            if used + len(data) > self.UPLOADS_MAX_BYTES:
+                return {"saved": False, "reason": "the library is full", "software": ids[0]}
             self.uploads.mkdir(parents=True, exist_ok=True)
             target = self.uploads / name
             # Write then rename, so a half-written file is never indexed

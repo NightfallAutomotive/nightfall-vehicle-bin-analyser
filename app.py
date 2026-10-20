@@ -22,6 +22,21 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # Stock originals used when only one file is uploaded
 LIBRARY = OriLibrary()
 
+# ECU flash reads are a few MB at most; refuse anything far bigger so a
+# public server can't be swamped
+MAX_UPLOAD_BYTES = 16 * 1024 * 1024
+
+
+class UploadTooLarge(Exception):
+    pass
+
+
+def read_upload(upload):
+    data = upload.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise UploadTooLarge(upload.filename or "file")
+    return data
+
 
 @app.get("/health")
 def health():
@@ -41,14 +56,14 @@ def analyse(
     save_original: bool = Form(True),
 ):
     try:
-        data = ori.file.read()
+        data = read_upload(ori)
 
         # Only one file: find its original in the library, or fall back to
         # pattern checks
         if stage1 is None:
             return JSONResponse(analyse_single(data, ori.filename or "", LIBRARY))
 
-        modified = stage1.file.read()
+        modified = read_upload(stage1)
         result = analyse_bin(
             data,
             modified,
@@ -67,6 +82,12 @@ def analyse(
         else:
             result["library"] = LIBRARY.add(data)
         return JSONResponse(result)
+
+    except UploadTooLarge as exc:
+        return JSONResponse(
+            {"ok": False, "message": f"{exc} is larger than 16 MB, too big to be an ECU read."},
+            status_code=413,
+        )
 
     except ValueError as exc:
         return JSONResponse(

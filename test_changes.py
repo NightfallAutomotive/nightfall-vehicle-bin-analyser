@@ -166,3 +166,21 @@ def test_web_upload_saves_original_unless_opted_out(tmp_path, monkeypatch):
     single = client.post("/analyse", files={"ori": ("test.bin", read("edc17c56_mod.bin"))}).json()
     assert single["comparison"]["mode"] == "library"
     assert single["changes"]["faults"]["fault_checks_off"] == 250
+
+
+def test_saved_uploads_stop_when_library_is_full(tmp_path, monkeypatch):
+    monkeypatch.setattr(OriLibrary, "UPLOADS_MAX_BYTES", 6 * 1024 * 1024)
+    library = OriLibrary(tmp_path)
+    assert library.add(read("edc17c56_ori.bin"))["saved"]
+    full = library.add(read("edc17c64_ori.bin"))
+    assert full == {"saved": False, "reason": "the library is full", "software": "1037539136"}
+
+
+def test_oversized_upload_is_refused(monkeypatch):
+    from fastapi.testclient import TestClient
+    import app
+
+    monkeypatch.setattr(app, "MAX_UPLOAD_BYTES", 1024)
+    response = TestClient(app.app).post("/analyse", files={"ori": ("big.bin", bytes(4096))})
+    assert response.status_code == 413
+    assert "larger than 16 MB" in response.json()["message"]

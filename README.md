@@ -2,6 +2,8 @@
 
 Open-source vehicle ECU BIN analysis and calibration tooling developed by Nightfall Automotive.
 
+Try the beta at **https://bin.nightfalltools.co.uk**.
+
 The project is intended for automotive technicians, calibration developers, researchers and enthusiasts who want to inspect ECU binary files and experiment with automated calibration analysis.
 
 ## Features
@@ -102,6 +104,38 @@ To add your curated originals, build the library locally with
 Any other Python host works the same way: install the requirements, set
 `NIGHTFALL_ORI_LIBRARY` to a folder on persistent storage, and run the
 uvicorn command above.
+
+### From your own computer (free)
+
+`deploy/install-home-server.sh` runs the analyser on your own Linux computer
+and puts it online through a free Cloudflare Tunnel, as systemd user
+services that start when you log in. Install `cloudflared` first (for
+example `brew install cloudflared`), then:
+
+    deploy/install-home-server.sh            # install and start
+    deploy/install-home-server.sh --remove   # stop and uninstall
+
+The analyser listens on 127.0.0.1 only, so the tunnel is the only way in.
+The library defaults to `~/.local/share/nightfall-bin-analyser/library`.
+Uploads are capped at 16 MB per file, and saved originals at
+`NIGHTFALL_UPLOADS_MAX_GB` (default 2).
+
+The quick tunnel needs no account, but its `trycloudflare.com` address
+changes each time it starts:
+
+    journalctl --user -u nightfall-tunnel | grep trycloudflare
+
+For a fixed address, add a domain to a free Cloudflare account, then:
+
+    deploy/install-home-server.sh --hostname bin.example.co.uk
+
+The first run opens a browser to log in to Cloudflare. It then creates a
+named tunnel, adds the DNS record for the address and switches the tunnel
+service over to it. Use a domain whose DNS is already on Cloudflare: moving
+an existing domain's DNS to Cloudflare affects its website and email too.
+
+Services start when you log in. To keep them running while logged out, run
+`loginctl enable-linger`.
 
 ## Test Files
 
