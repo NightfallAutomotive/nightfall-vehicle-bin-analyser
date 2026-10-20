@@ -184,3 +184,12 @@ def test_oversized_upload_is_refused(monkeypatch):
     response = TestClient(app.app).post("/analyse", files={"ori": ("big.bin", bytes(4096))})
     assert response.status_code == 413
     assert "larger than 16 MB" in response.json()["message"]
+
+
+def test_library_skips_originals_deleted_while_running(tmp_path):
+    library = OriLibrary(tmp_path)
+    library.add(read("edc17c56_ori.bin"))
+    assert library.find(read("edc17c56_mod.bin"))
+    for saved in (tmp_path / "uploads").iterdir():
+        saved.unlink()
+    assert library.find(read("edc17c56_mod.bin")) is None

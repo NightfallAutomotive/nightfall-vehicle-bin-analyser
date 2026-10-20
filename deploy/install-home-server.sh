@@ -38,6 +38,9 @@ if [ ! -x "$REPO/.venv/bin/uvicorn" ]; then
     "$REPO/.venv/bin/pip" install -q -r "$REPO/requirements.txt"
 fi
 mkdir -p "$UNITS" "$LIBRARY"
+# The sandbox needs real paths, not ones through the /home link
+REPO=$(realpath "$REPO")
+LIBRARY=$(realpath "$LIBRARY")
 
 cat > "$UNITS/nightfall-bin-analyser.service" <<EOF
 [Unit]
@@ -48,6 +51,26 @@ WorkingDirectory=$REPO
 Environment=NIGHTFALL_ORI_LIBRARY=$LIBRARY
 ExecStart=$REPO/.venv/bin/uvicorn app:app --host 127.0.0.1 --port $PORT
 Restart=on-failure
+
+# Sandbox: hide the home folders (on Fedora Atomic /home is a link to
+# /var/home), then let back in only the code (read-only) and the library
+# (read-write). The rest of the system is read-only.
+PrivateUsers=yes
+TemporaryFileSystem=/var/home:ro /root:ro
+BindReadOnlyPaths=$REPO
+BindPaths=$LIBRARY
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+# Python can't write .pyc files into the read-only code folder; that's fine
+Environment=PYTHONDONTWRITEBYTECODE=1
 
 [Install]
 WantedBy=default.target

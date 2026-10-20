@@ -360,7 +360,11 @@ class OriLibrary:
         best = None
         for sw in software_ids(data):
             for path in index.get(sw, []):
-                ref = path.read_bytes()
+                # Files can be deleted by hand while the server runs
+                try:
+                    ref = path.read_bytes()
+                except FileNotFoundError:
+                    continue
                 if len(ref) != len(data):
                     continue
                 differing = sum(r["length"] for r in changed_regions(ref, data))
