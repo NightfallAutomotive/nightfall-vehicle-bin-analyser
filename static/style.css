@@ -23,6 +23,95 @@
   --radius: 12px;
   --font: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
+  --glow-top: rgba(136, 192, 208, 0.10);
+  --glow-corner: rgba(163, 190, 140, 0.05);
+  --header-line: rgba(136, 192, 208, 0.16);
+  --glass-top: rgba(53, 61, 76, 0.9);
+  --glass: rgba(46, 52, 64, 0.88);
+  --glass-deep: rgba(32, 36, 45, 0.85);
+  --wash: rgba(236, 239, 244, 0.06);
+  --wash-text: #ffffff;
+  --hairline: var(--hairline);
+  --warn-text: #d08770;
+  --primary-top: #b4cf9c;
+  --on-primary: var(--bg-deep);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Light mode (Nord Snow Storm): the device's setting, unless the sun/moon switch chose (data-theme).
+   Colours are deepened so text passes 4.5:1 on the pale panels. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #e5e9f0;
+    --bg-deep: #e5e9f0;
+    --panel: #f2f4f8;
+    --panel-light: #f7f8fa;
+    --border: #cbd2dd;
+    --text: #2e3440;
+    --muted: #4c566a;
+    --dim: #5e6779;
+    --cyan: #2f6f80;
+    --blue: #476588;
+    --purple: #7b4f74;
+    --green: #3f6b32;
+    --red: #a3404a;
+    --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
+    --glow-top: rgba(94, 129, 172, 0.14);
+    --glow-corner: rgba(163, 190, 140, 0.12);
+    --header-line: rgba(71, 101, 136, 0.2);
+    --glass-top: rgba(247, 248, 250, 0.92);
+    --glass: rgba(242, 244, 248, 0.9);
+    --glass-deep: rgba(229, 233, 240, 0.9);
+    --wash: rgba(46, 52, 64, 0.05);
+    --wash-text: #2e3440;
+    --hairline: rgba(46, 52, 64, 0.16);
+    --warn-text: #a14f2c;
+    --primary-top: #4f7f41;
+    --on-primary: #ffffff;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e5e9f0;
+  --bg-deep: #e5e9f0;
+  --panel: #f2f4f8;
+  --panel-light: #f7f8fa;
+  --border: #cbd2dd;
+  --text: #2e3440;
+  --muted: #4c566a;
+  --dim: #5e6779;
+  --cyan: #2f6f80;
+  --blue: #476588;
+  --purple: #7b4f74;
+  --green: #3f6b32;
+  --red: #a3404a;
+  --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
+  --glow-top: rgba(94, 129, 172, 0.14);
+  --glow-corner: rgba(163, 190, 140, 0.12);
+  --header-line: rgba(71, 101, 136, 0.2);
+  --glass-top: rgba(247, 248, 250, 0.92);
+  --glass: rgba(242, 244, 248, 0.9);
+  --glass-deep: rgba(229, 233, 240, 0.9);
+  --wash: rgba(46, 52, 64, 0.05);
+  --wash-text: #2e3440;
+  --hairline: rgba(46, 52, 64, 0.16);
+  --warn-text: #a14f2c;
+  --primary-top: #4f7f41;
+  --on-primary: #ffffff;
+}
+
+/* while switching, colours ease across instead of jumping */
+html.theming,
+html.theming * {
+  transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease !important;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 * {
@@ -44,8 +133,8 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   background:
-    radial-gradient(ellipse at 50% 0%, rgba(136, 192, 208, 0.10), transparent 50%),
-    radial-gradient(ellipse at 100% 100%, rgba(163, 190, 140, 0.05), transparent 45%),
+    radial-gradient(ellipse at 50% 0%, var(--glow-top), transparent 50%),
+    radial-gradient(ellipse at 100% 100%, var(--glow-corner), transparent 45%),
     var(--bg-deep);
   color: var(--text);
   font-family: var(--font);
@@ -83,6 +172,12 @@ a:hover {
   mask-image: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%);
 }
 
+/* the rain's pale glyphs vanish on a light page, so darken them there */
+[data-mode="light"] .matrix-rain {
+  opacity: 0.16;
+  filter: brightness(0.5) saturate(1.4);
+}
+
 .page {
   position: relative;
   z-index: 1;
@@ -108,7 +203,7 @@ main {
   gap: 20px;
   padding: 0 0 24px;
   margin-bottom: 28px;
-  border-bottom: 1px solid rgba(136, 192, 208, 0.16);
+  border-bottom: 1px solid var(--header-line);
 }
 
 .brand {
@@ -180,6 +275,65 @@ main {
   transform: translateX(-3px);
 }
 
+/* the sun/moon switch (as on Nightfall Tools, RemapData and Statement Bridge):
+   shows the current mode, turning from one to the other */
+.theme {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 100ms var(--ease-out), color 150ms ease, border-color 150ms ease;
+}
+
+.theme svg {
+  grid-area: 1 / 1;
+  width: 18px;
+  height: 18px;
+  transition: transform 0.35s var(--ease-out), opacity 0.2s ease;
+}
+
+.theme .sun,
+[data-mode="light"] .theme .moon {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.5);
+}
+
+[data-mode="light"] .theme .sun {
+  opacity: 1;
+  transform: none;
+}
+
+.theme:active {
+  transform: scale(0.92);
+}
+
+.theme:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .theme:hover {
+    border-color: var(--cyan);
+    color: var(--text);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme,
+  .theme svg {
+    transition: none;
+  }
+}
+
 .page-tag {
   color: var(--muted);
   font-size: 11px;
@@ -198,7 +352,7 @@ main {
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgba(53, 61, 76, 0.9), rgba(46, 52, 64, 0.88) 120px);
+  background: linear-gradient(180deg, var(--glass-top), var(--glass) 120px);
   box-shadow: var(--shadow);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
@@ -385,9 +539,9 @@ input[type="file"]:focus-visible {
   padding: 12px 24px;
   border: 0;
   border-radius: 8px;
-  background: linear-gradient(180deg, #b4cf9c, var(--green));
+  background: linear-gradient(180deg, var(--primary-top), var(--green));
   box-shadow: 0 8px 20px -8px rgba(163, 190, 140, 0.6);
-  color: var(--bg-deep);
+  color: var(--on-primary);
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -423,7 +577,7 @@ input[type="file"]:focus-visible {
   border: 1px solid rgba(191, 97, 106, 0.45);
   border-radius: 8px;
   background: rgba(191, 97, 106, 0.1);
-  color: #d08770;
+  color: var(--warn-text);
   font-size: 14px;
 }
 
@@ -446,7 +600,7 @@ input[type="file"]:focus-visible {
   padding: 18px 18px 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(46, 52, 64, 0.88);
+  background: var(--glass);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow);
@@ -809,7 +963,7 @@ td.gain-down {
   padding: 24px 28px;
   border: 1px dashed rgba(180, 142, 173, 0.55);
   border-radius: var(--radius);
-  background: rgba(46, 52, 64, 0.88);
+  background: var(--glass);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
@@ -845,7 +999,7 @@ td.gain-down {
   min-width: 200px;
   padding: 14px 26px;
   border-radius: 12px;
-  background: rgba(32, 36, 45, 0.85);
+  background: var(--glass-deep);
   color: var(--text);
   font-size: 13px;
   font-weight: 800;
@@ -855,8 +1009,8 @@ td.gain-down {
 }
 
 .beta-button:hover {
-  background: rgba(236, 239, 244, 0.06);
-  color: #ffffff;
+  background: var(--wash);
+  color: var(--wash-text);
   transform: translateY(-1px);
 }
 
@@ -875,7 +1029,7 @@ td.gain-down {
 
 /* A faint resting outline for the star to travel along */
 .star-border--dark {
-  box-shadow: inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14);
+  box-shadow: inset 0 0 0 var(--sb-thickness) var(--hairline);
 }
 
 .star-border > :not(.sb-layer) {
@@ -906,12 +1060,12 @@ td.gain-down {
 @keyframes sb-pulse {
   from {
     box-shadow:
-      inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14),
+      inset 0 0 0 var(--sb-thickness) var(--hairline),
       0 0 0 0 color-mix(in srgb, var(--sb-color) 45%, transparent);
   }
   to {
     box-shadow:
-      inset 0 0 0 var(--sb-thickness) rgba(236, 239, 244, 0.14),
+      inset 0 0 0 var(--sb-thickness) var(--hairline),
       0 0 0 14px color-mix(in srgb, var(--sb-color) 0%, transparent);
   }
 }
