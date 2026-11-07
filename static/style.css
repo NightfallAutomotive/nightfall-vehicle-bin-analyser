@@ -232,34 +232,54 @@ main {
 .header-links {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 12px;
 }
 
-.back-link {
+/* button to the main Nightfall Automotive site; same height, border and press as the sun/moon switch */
+.site-button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  height: 36px;
+  padding: 0 12px 0 14px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.14em;
-  transition: border-color 120ms ease, color 120ms ease;
+  white-space: nowrap;
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 100ms var(--ease-out), color 150ms ease, border-color 150ms ease;
 }
 
-.back-link:hover {
-  border-color: var(--cyan);
-  color: var(--text);
+.site-button svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transition: transform 150ms var(--ease-out);
 }
 
-.back-link span {
-  transition: transform 120ms ease;
+@media (hover: hover) and (pointer: fine) {
+  .site-button:hover {
+    border-color: var(--green);
+    color: var(--text);
+  }
+
+  .site-button:hover svg {
+    transform: translate(1px, -1px);
+  }
 }
 
-.back-link:hover span {
-  transform: translateX(-3px);
+.site-button:active {
+  transform: scale(0.96);
+}
+
+.site-button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
 }
 
 /* the sun/moon switch (as on Nightfall Tools, RemapData and Statement Bridge):
@@ -316,7 +336,9 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
   .theme,
-  .theme svg {
+  .theme svg,
+  .site-button,
+  .site-button svg {
     transition: none;
   }
 }
@@ -1053,18 +1075,20 @@ td.gain-down {
 }
 
 @media (max-width: 640px) {
-  .back-link {
-    padding: 7px 11px;
-    font-size: 10px;
+  .header-links {
+    gap: 10px;
   }
 
-  .back-link .back-text {
-    display: none;
+  /* NIGHTFALL over AUTOMOTIVE, so the button fits beside the logo on a phone */
+  .site-button {
+    padding: 0 10px;
+    gap: 6px;
+    font-size: 9px;
+    line-height: 1.2;
   }
 
-  .back-link span[aria-hidden] {
-    font-size: 16px;
-    line-height: 1;
+  .site-name span {
+    display: block;
   }
 
   .panel-header,
