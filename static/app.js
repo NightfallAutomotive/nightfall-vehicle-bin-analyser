@@ -753,8 +753,6 @@ function renderTable(points) {
 
 
 // Decoration only, so it runs last and can never stop the analyser above
-new MatrixRain(document.getElementById("matrix-rain"));
-
 new StarBorder(document.getElementById("report-button"), {
     color: "#a3be8c",
     trailColor: "#a3be8c",
@@ -769,17 +767,4 @@ new StarBorder(document.getElementById("report-button"), {
     sparkle: false,
     clickPulse: true,
     theme: "dark",
-});
-
-new DecryptedText(document.getElementById("page-title"), {
-    animateOn: "inViewHover",
-    effect: "scramble",
-    sequential: true,
-    revealDirection: "start",
-    speed: 60,
-    maxIterations: 10,
-    hoverRadius: 100,
-    scrambleColor: "#a3be8c",
-    className: "revealed",
-    encryptedClassName: "encrypted",
 });

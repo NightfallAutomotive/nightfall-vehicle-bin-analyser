@@ -23,12 +23,10 @@
   --radius: 12px;
   --font: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
-  --glow-top: rgba(136, 192, 208, 0.10);
-  --glow-corner: rgba(163, 190, 140, 0.05);
   --header-line: rgba(136, 192, 208, 0.16);
-  --glass-top: rgba(53, 61, 76, 0.9);
-  --glass: rgba(46, 52, 64, 0.88);
-  --glass-deep: rgba(32, 36, 45, 0.85);
+  --glass-top: rgba(53, 61, 76, 1);
+  --glass: rgba(46, 52, 64, 1);
+  --glass-deep: rgba(32, 36, 45, 1);
   --wash: rgba(236, 239, 244, 0.06);
   --wash-text: #ffffff;
   --hairline: var(--hairline);
@@ -57,12 +55,10 @@
     --green: #2e4a72;
     --red: #a3404a;
     --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
-    --glow-top: rgba(94, 129, 172, 0.14);
-    --glow-corner: rgba(46, 74, 114, 0.1);
     --header-line: rgba(71, 101, 136, 0.2);
-    --glass-top: rgba(247, 248, 250, 0.92);
-    --glass: rgba(242, 244, 248, 0.9);
-    --glass-deep: rgba(229, 233, 240, 0.9);
+    --glass-top: rgba(247, 248, 250, 1);
+    --glass: rgba(242, 244, 248, 1);
+    --glass-deep: rgba(229, 233, 240, 1);
     --wash: rgba(46, 52, 64, 0.05);
     --wash-text: #2e3440;
     --hairline: rgba(46, 52, 64, 0.16);
@@ -88,12 +84,10 @@
   --green: #2e4a72;
   --red: #a3404a;
   --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
-  --glow-top: rgba(94, 129, 172, 0.14);
-  --glow-corner: rgba(46, 74, 114, 0.1);
   --header-line: rgba(71, 101, 136, 0.2);
-  --glass-top: rgba(247, 248, 250, 0.92);
-  --glass: rgba(242, 244, 248, 0.9);
-  --glass-deep: rgba(229, 233, 240, 0.9);
+  --glass-top: rgba(247, 248, 250, 1);
+  --glass: rgba(242, 244, 248, 1);
+  --glass-deep: rgba(229, 233, 240, 1);
   --wash: rgba(46, 52, 64, 0.05);
   --wash-text: #2e3440;
   --hairline: rgba(46, 52, 64, 0.16);
@@ -132,10 +126,7 @@ body {
   margin: 0;
   min-height: 100vh;
   min-height: 100dvh;
-  background:
-    radial-gradient(ellipse at 50% 0%, var(--glow-top), transparent 50%),
-    radial-gradient(ellipse at 100% 100%, var(--glow-corner), transparent 45%),
-    var(--bg-deep);
+  background: var(--bg-deep);
   color: var(--text);
   font-family: var(--font);
   font-size: 15px;
@@ -156,26 +147,6 @@ a {
 
 a:hover {
   color: var(--text);
-}
-
-/* Hex-digit rain behind everything; kept faint so the page stays readable */
-.matrix-rain {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.22;
-  pointer-events: none;
-  /* Fade the rain out towards the bottom of the screen */
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%);
-  mask-image: linear-gradient(180deg, #000 0%, #000 55%, transparent 100%);
-}
-
-/* the rain's pale glyphs vanish on a light page, so darken them there */
-[data-mode="light"] .matrix-rain {
-  opacity: 0.16;
-  filter: brightness(0.5) saturate(1.4);
 }
 
 .page {
@@ -217,29 +188,45 @@ main {
   color: var(--text);
 }
 
-.brand-logo {
+/* the wire skull is drawn from its SVG as a mask, so it takes the accent colour in either mode */
+.brand-skull {
   display: block;
-  width: auto;
-  height: 36px;
+  height: 44px;
+  aspect-ratio: 1364 / 1911;
+  background: var(--green);
+  -webkit-mask: url("wire-skull.svg") center / contain no-repeat;
+  mask: url("wire-skull.svg") center / contain no-repeat;
+}
+
+.brand-rule {
+  display: block;
+  width: 1px;
+  align-self: stretch;
+  margin-block: 4px;
+  background: var(--header-line);
 }
 
 .brand-copy {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-  letter-spacing: 0.15em;
+  display: grid;
+  gap: 6px;
+  line-height: 1;
 }
 
 .brand-copy strong {
   font-size: 15px;
   font-weight: 900;
+  letter-spacing: 0.28em;
 }
 
 .brand-copy > span {
-  margin-top: 5px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.3em;
+}
+
+.brand-copy b {
+  color: var(--green);
+  font-weight: 800;
 }
 
 .header-links {
@@ -334,28 +321,13 @@ main {
   }
 }
 
-.page-tag {
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.18em;
-}
-
-.page-tag strong {
-  margin-left: 8px;
-  color: var(--purple);
-  font-size: 20px;
-}
-
 /* ---------- Panels ---------- */
 
-/* Slightly see-through with a blur, so the rain shows faintly behind */
 .panel {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: linear-gradient(180deg, var(--glass-top), var(--glass) 120px);
   box-shadow: var(--shadow);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
 }
 
 .panel + .panel,
@@ -372,30 +344,22 @@ main {
   padding: 30px 34px;
 }
 
-.eyebrow {
-  margin: 0 0 10px;
-  color: var(--cyan);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-}
-
-h1 {
-  margin: 0;
-  color: var(--text);
-  font-size: clamp(30px, 4vw, 52px);
-  font-weight: 900;
-  line-height: 1.08;
-  letter-spacing: -0.045em;
-}
-
-h1 .accent {
-  color: var(--green);
+/* the page title is in the logo, so the heading is for screen readers only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .intro {
   max-width: 650px;
-  margin: 14px 0 0;
+  margin: 0;
   color: var(--muted);
   font-size: 14px;
 }
@@ -540,18 +504,19 @@ input[type="file"]:focus-visible {
   border: 0;
   border-radius: 8px;
   background: linear-gradient(180deg, var(--primary-top), var(--green));
-  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--green) 60%, transparent);
   color: var(--on-primary);
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 100ms var(--ease-out);
 }
 
-.primary-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 24px -8px color-mix(in srgb, var(--green) 70%, transparent);
+/* shrinks a touch when pressed, like the buttons on the tools page */
+.primary-button:active {
+  transform: scale(0.97);
 }
 
 .primary-button:focus-visible {
@@ -601,8 +566,6 @@ input[type="file"]:focus-visible {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--glass);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   box-shadow: var(--shadow);
 }
 
@@ -964,8 +927,6 @@ td.gain-down {
   border: 1px dashed rgba(180, 142, 173, 0.55);
   border-radius: var(--radius);
   background: var(--glass);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
 }
 
 .beta-tag {
@@ -1092,10 +1053,6 @@ td.gain-down {
 }
 
 @media (max-width: 640px) {
-  .page-tag {
-    display: none;
-  }
-
   .back-link {
     padding: 7px 11px;
     font-size: 10px;
