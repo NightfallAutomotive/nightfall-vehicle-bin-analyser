@@ -1111,3 +1111,17 @@ td.gain-down {
     text-align: center;
   }
 }
+
+/* small phones: the logo and both header buttons stay on one line */
+@media (max-width: 420px) {
+  .page-header { gap: 12px; }
+  .header-links { gap: 8px; }
+  .brand { gap: 10px; }
+  .brand-skull { height: 38px; }
+  .brand-copy strong { font-size: 14px; letter-spacing: .2em; }
+  .brand-copy > span { letter-spacing: .22em; white-space: nowrap; }
+}
+/* the smallest phones: drop the button's arrow so everything still fits */
+@media (max-width: 380px) {
+  .site-button svg { display: none; }
+}
