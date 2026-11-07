@@ -54,11 +54,11 @@
     --cyan: #2f6f80;
     --blue: #476588;
     --purple: #7b4f74;
-    --green: #3f6b32;
+    --green: #2e4a72;
     --red: #a3404a;
     --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
     --glow-top: rgba(94, 129, 172, 0.14);
-    --glow-corner: rgba(163, 190, 140, 0.12);
+    --glow-corner: rgba(46, 74, 114, 0.1);
     --header-line: rgba(71, 101, 136, 0.2);
     --glass-top: rgba(247, 248, 250, 0.92);
     --glass: rgba(242, 244, 248, 0.9);
@@ -67,7 +67,7 @@
     --wash-text: #2e3440;
     --hairline: rgba(46, 52, 64, 0.16);
     --warn-text: #a14f2c;
-    --primary-top: #4f7f41;
+    --primary-top: #3d5d8a;
     --on-primary: #ffffff;
   }
 }
@@ -85,11 +85,11 @@
   --cyan: #2f6f80;
   --blue: #476588;
   --purple: #7b4f74;
-  --green: #3f6b32;
+  --green: #2e4a72;
   --red: #a3404a;
   --shadow: 0 24px 48px -28px rgba(46, 52, 64, 0.35);
   --glow-top: rgba(94, 129, 172, 0.14);
-  --glow-corner: rgba(163, 190, 140, 0.12);
+  --glow-corner: rgba(46, 74, 114, 0.1);
   --header-line: rgba(71, 101, 136, 0.2);
   --glass-top: rgba(247, 248, 250, 0.92);
   --glass: rgba(242, 244, 248, 0.9);
@@ -98,7 +98,7 @@
   --wash-text: #2e3440;
   --hairline: rgba(46, 52, 64, 0.16);
   --warn-text: #a14f2c;
-  --primary-top: #4f7f41;
+  --primary-top: #3d5d8a;
   --on-primary: #ffffff;
 }
 
@@ -427,7 +427,7 @@ h1 .accent {
 
 .upload-box.has-file {
   border-style: solid;
-  border-color: rgba(163, 190, 140, 0.55);
+  border-color: color-mix(in srgb, var(--green) 55%, transparent);
 }
 
 .upload-label {
@@ -540,7 +540,7 @@ input[type="file"]:focus-visible {
   border: 0;
   border-radius: 8px;
   background: linear-gradient(180deg, var(--primary-top), var(--green));
-  box-shadow: 0 8px 20px -8px rgba(163, 190, 140, 0.6);
+  box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--green) 60%, transparent);
   color: var(--on-primary);
   font-size: 14px;
   font-weight: 800;
@@ -551,7 +551,7 @@ input[type="file"]:focus-visible {
 
 .primary-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 24px -8px rgba(163, 190, 140, 0.7);
+  box-shadow: 0 12px 24px -8px color-mix(in srgb, var(--green) 70%, transparent);
 }
 
 .primary-button:focus-visible {
@@ -790,7 +790,7 @@ input[type="file"]:focus-visible {
 
 .stage-path {
   stroke: var(--green);
-  filter: drop-shadow(0 4px 10px rgba(163, 190, 140, 0.35));
+  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--green) 35%, transparent));
 }
 
 .point {
